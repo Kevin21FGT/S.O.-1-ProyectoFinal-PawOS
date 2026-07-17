@@ -75,3 +75,5 @@ mascotas, vacunas pendientes, adopcion (transaccion que marca la mascota
 como adoptada), donantes y generacion de reporte -- todo paso
 correctamente. La interfaz ncurses se compilo y enlazo sin errores;
 pruebenla de forma interactiva en su VM (necesita una terminal real).
+
+Este es una prueba
