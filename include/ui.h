@@ -7,6 +7,7 @@
 #define CP_SEL      3
 #define CP_OK       4
 #define CP_ERROR    5
+#define CP_BORDE    6
 
 void ui_iniciar(void);
 void ui_finalizar(void);
