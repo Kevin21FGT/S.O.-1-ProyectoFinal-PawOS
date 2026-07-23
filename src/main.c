@@ -13,6 +13,7 @@
 #include "../include/ui.h"
 #include "../include/auth.h"
 #include "../include/pantallas.h"
+#include "../include/pantalla_procesos.h"
 
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
 
@@ -42,10 +43,11 @@ int main(int argc, char **argv) {
             "Control de Adopciones",
             "Base de Donantes",
             "Reportes",
+            "Administracion de Procesos",
             "Salir"
         };
-        int sel = ui_menu("PawOS - Menu Principal", opciones, 6);
-        if (sel < 0 || sel == 5) break;
+        int sel = ui_menu("PawOS - Menu Principal", opciones, 7);
+        if (sel < 0 || sel == 6) break;
 
         switch (sel) {
             case 0: pantalla_mascotas(rol); break;
@@ -53,6 +55,7 @@ int main(int argc, char **argv) {
             case 2: pantalla_adopciones(rol); break;
             case 3: pantalla_donantes(rol); break;
             case 4: pantalla_reportes(rol); break;
+            case 5: pantalla_procesos(rol); break;
         }
     }
 
