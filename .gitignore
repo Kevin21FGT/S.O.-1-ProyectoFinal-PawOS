@@ -3,3 +3,6 @@ live-build-config/chroot/
 live-build-config/binary/
 live-build-config/.build/
 *.iso
+*.o
+pawos-refugio
+pawos.db
