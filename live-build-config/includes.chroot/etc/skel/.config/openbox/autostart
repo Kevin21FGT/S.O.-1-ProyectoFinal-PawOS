@@ -1,0 +1,2 @@
+# Abrir PawOS en una terminal al iniciar sesion
+xterm -fullscreen -e /usr/local/bin/pawos-refugio &

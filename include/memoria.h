@@ -8,9 +8,9 @@
 // ==========================================
 // CONSTANTES DEL SISTEMA DE MEMORIA
 // ==========================================
-#define TAMANIO_PAGINA 4096               // 4 KB (estandar de x86)
-#define TAMANIO_MARCOS 1024              // 4 MB de RAM total (para pruebas)
-#define TAMANIO_MEMORIA (TAMANIO_PAGINA * TAMANIO_MARCOS) // 4 MB de RAM total
+#define TAMANO_PAGINA 4096               // 4 KB (estandar de x86)
+#define NUMERO_MARCOS 1024               // 4 MB de RAM total (para pruebas)
+#define TAMANO_MEMORIA (TAMANO_PAGINA * NUMERO_MARCOS) // 4 MB de RAM total
 
 #define MAX_PROCESOS 16                  // Maximo de procesos simultaneos
 #define MAX_PAGINAS_POR_PROCESO 64       // 256 KB por proceso (64 paginas de 4 KB)
@@ -26,7 +26,8 @@ typedef struct {
     uint32_t modificado : 1;        // 1 = ha cambiado (hay que guardarlo)
     uint32_t referenciado : 1;      // 1 = se ha usado recientemente (para LRU)
     uint32_t protegida : 1;         // 1 = solo lectura
-    uint32_t swap_ubicacion : 8;    // Índice en disco si está en swap
+    uint32_t en_swap : 1;           // 1 = está en el archivo swap
+    uint32_t swap_ubicacion : 7;    // Índice en disco si está en swap (0-127)
 } entrada_pagina_t;
 
 // Tabla de páginas de un proceso

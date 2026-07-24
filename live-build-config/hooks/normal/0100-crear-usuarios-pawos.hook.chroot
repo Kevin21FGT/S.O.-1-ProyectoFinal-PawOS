@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+# Crear grupos de roles para PawOS
+addgroup --system pawos-admin
+addgroup --system pawos-veterinario
+addgroup --system pawos-voluntario
+
+# Crear usuarios de ejemplo
+adduser --system --ingroup pawos-admin admin_refugio
+adduser --system --ingroup pawos-veterinario veterinario1
+adduser --system --ingroup pawos-voluntario voluntario1
+
+# Agregar usuarios a sus grupos secundarios
+adduser admin_refugio pawos-admin
+adduser veterinario1 pawos-veterinario
+adduser voluntario1 pawos-voluntario
+
+# Crear directorio de datos
+mkdir -p /var/pawos/reportes
+chmod 777 /var/pawos
