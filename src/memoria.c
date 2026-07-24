@@ -142,18 +142,18 @@ static bool _leer_swap(uint32_t id_proceso, uint32_t num_pagina, uint8_t* buffer
 bool memoria_inicializar(void) {
     printf("[MEMORIA] Inicializando sistema de memoria para RefugioOS...\n");
     
-    // Inicializar estructuras
-    _inicializar_memoria_fisica();
-    
-    for (int i = 0; i < MAX_PROCESOS; i++) {
-        tablas_procesos[i] = NULL;
-    }
-    
-    // Inicializar estadísticas
+    // Inicializar estadísticas primero
     memset(&estadisticas, 0, sizeof(estadisticas_memoria_t));
     estadisticas.paginas_totales = TAMANIO_MARCOS;
     estadisticas.memoria_total_bytes = TAMANIO_MEMORIA;
-    
+
+    // Inicializar estructuras (esto configura paginas_usadas/libres reales)
+    _inicializar_memoria_fisica();
+
+    for (int i = 0; i < MAX_PROCESOS; i++) {
+        tablas_procesos[i] = NULL;
+    }
+
     // Abrir archivo swap
     archivo_swap = fopen(NOMBRE_SWAP, "w+b");
     if (archivo_swap == NULL) {
