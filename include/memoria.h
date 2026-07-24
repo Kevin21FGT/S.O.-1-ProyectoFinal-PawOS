@@ -38,7 +38,7 @@ typedef struct {
 
 // Estructura de un marco de memoria física
 typedef struct {
-    uint8_t datos[TAMANO_PAGINA];   // Los datos reales
+    uint8_t datos[TAMANIO_PAGINA];   // Los datos reales
     uint32_t id_proceso;            // -1 si está libre
     uint32_t numero_pagina;         // Página virtual que contiene
     bool libre;                     // true si disponible
