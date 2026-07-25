@@ -58,7 +58,6 @@ static int _buscar_marco_libre(void) {
 // Algoritmo de reloj (Second-Chance / Clock) para reemplazo de páginas
 static int _encontrar_victima_lru(void) {
     int victima = -1;
-    uint32_t menor_referencia = 0xFFFFFFFF;
 
     for (int i = 4; i < TAMANIO_MARCOS; i++) {
         if (!memoria_fisica[i].libre) {
@@ -67,18 +66,20 @@ static int _encontrar_victima_lru(void) {
 
             if (id_proc < MAX_PROCESOS && tablas_procesos[id_proc] != NULL) {
                 entrada_pagina_t* pag = &tablas_procesos[id_proc]->paginas[num_pag];
-                
-                // Si no ha sido referenciada, es candidata
+
                 if (pag->referenciado == 0) {
+                    // Si no ha sido referenciada, es candidata
                     if (pag->modificado == 0) {
                         // No modificada → mejor candidata
                         return i;
                     }
-                    // Modificada pero no referenciada
-                    if (pag->modificado < menor_referencia) {
-                        menor_referencia = pag->modificado;
+                    if (victima == -1) {
                         victima = i;
                     }
+                } else {
+                    // Referenciada: se le da una segunda oportunidad
+                    // (si no, nunca vuelve a ser candidata a víctima)
+                    pag->referenciado = 0;
                 }
             }
         }
@@ -238,8 +239,16 @@ void* memoria_asignar(uint32_t id_proceso, uint32_t tamaño_bytes) {
         return NULL;
     }
 
+    if (tamaño_bytes == 0) {
+        printf("[MEMORIA] ERROR: Tamaño de asignación inválido (0 bytes)\n");
+        return NULL;
+    }
+
     tabla_paginas_t* tabla = tablas_procesos[id_proceso];
-    uint32_t paginas_necesarias = (tamaño_bytes + TAMANIO_PAGINA - 1) / TAMANIO_PAGINA;
+    uint32_t paginas_necesarias = tamaño_bytes / TAMANIO_PAGINA;
+    if (tamaño_bytes % TAMANIO_PAGINA != 0) {
+        paginas_necesarias++;
+    }
     uint32_t pagina_inicio = tabla->contador_paginas_usadas;
 
     if (pagina_inicio + paginas_necesarias > MAX_PAGINAS_POR_PROCESO) {
@@ -343,11 +352,17 @@ uint8_t memoria_leer_byte(uint32_t id_proceso, void* direccion_virtual) {
     uint32_t num_pagina = dir / TAMANIO_PAGINA;
     uint32_t offset = dir % TAMANIO_PAGINA;
 
+    if (num_pagina >= MAX_PAGINAS_POR_PROCESO) {
+        return 0;
+    }
+
     tabla_paginas_t* tabla = tablas_procesos[id_proceso];
     entrada_pagina_t* pag = &tabla->paginas[num_pagina];
 
     if (!pag->presente) {
-        _memoria_manejar_page_fault(tabla, dir);
+        if (!_memoria_manejar_page_fault(tabla, dir)) {
+            return 0;
+        }
     }
 
     pag->referenciado = 1;
@@ -364,11 +379,17 @@ bool memoria_escribir_byte(uint32_t id_proceso, void* direccion_virtual, uint8_t
     uint32_t num_pagina = dir / TAMANIO_PAGINA;
     uint32_t offset = dir % TAMANIO_PAGINA;
 
+    if (num_pagina >= MAX_PAGINAS_POR_PROCESO) {
+        return false;
+    }
+
     tabla_paginas_t* tabla = tablas_procesos[id_proceso];
     entrada_pagina_t* pag = &tabla->paginas[num_pagina];
 
     if (!pag->presente) {
-        _memoria_manejar_page_fault(tabla, dir);
+        if (!_memoria_manejar_page_fault(tabla, dir)) {
+            return false;
+        }
     }
 
     pag->referenciado = 1;
@@ -416,8 +437,9 @@ bool _memoria_manejar_page_fault(tabla_paginas_t* tabla, uint32_t direccion_virt
     }
     
     // Leer del swap o iniciar página vacía
-    if (pag->swap_ubicacion != 0) {
+    if (pag->en_swap) {
         _leer_swap(tabla->id_proceso, num_pagina, memoria_fisica[marco].datos);
+        pag->en_swap = 0;
     } else {
         memset(memoria_fisica[marco].datos, 0, TAMANIO_PAGINA);
     }
