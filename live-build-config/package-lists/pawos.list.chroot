@@ -1,6 +1,8 @@
-libncurses6
-libsqlite3-0
-xorg
+lightdm
+lightdm-gtk-greeter
+xserver-xorg
+xserver-xorg-video-fbdev
 openbox
 xterm
-lightdm
+libncurses6
+libsqlite3-0

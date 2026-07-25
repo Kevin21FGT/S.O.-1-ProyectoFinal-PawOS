@@ -13,6 +13,9 @@
 #include "../include/ui.h"
 #include "../include/auth.h"
 #include "../include/pantallas.h"
+#include "../include/pantalla_procesos.h"
+#include "../include/pantalla_memoria.h"
+#include "../include/memoria.h"
 
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
 
@@ -29,8 +32,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    ui_iniciar();
+        if (!memoria_inicializar()) {
+        fprintf(stderr, "Aviso: no se pudo inicializar el sistema de memoria.\n");
+    }
 
+    ui_iniciar();
+    
     const char *usuario = auth_usuario_actual();
     Rol rol = auth_rol_actual();
     ui_bienvenida(usuario, auth_rol_nombre(rol));
@@ -42,10 +49,12 @@ int main(int argc, char **argv) {
             "Control de Adopciones",
             "Base de Donantes",
             "Reportes",
+            "Administracion de Procesos",
+            "Administracion de Memoria",
             "Salir"
         };
-        int sel = ui_menu("PawOS - Menu Principal", opciones, 6);
-        if (sel < 0 || sel == 5) break;
+        int sel = ui_menu("PawOS - Menu Principal", opciones, 8);
+        if (sel < 0 || sel == 7) break;
 
         switch (sel) {
             case 0: pantalla_mascotas(rol); break;
@@ -53,6 +62,8 @@ int main(int argc, char **argv) {
             case 2: pantalla_adopciones(rol); break;
             case 3: pantalla_donantes(rol); break;
             case 4: pantalla_reportes(rol); break;
+            case 5: pantalla_procesos(rol); break;
+            case 6: pantalla_memoria(rol); break;
         }
     }
 

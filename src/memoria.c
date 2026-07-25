@@ -10,7 +10,7 @@
 // ============================================
 
 // La RAM física: arreglo de marcos
-static marco_memoria_t memoria_fisica[NUMERO_MARCOS];
+static marco_memoria_t memoria_fisica[TAMANIO_MARCOS];
 
 // Tablas de páginas de todos los procesos
 static tabla_paginas_t* tablas_procesos[MAX_PROCESOS];
@@ -28,8 +28,8 @@ static const char* NOMBRE_SWAP = "refugio_swap.bin";
 
 // Inicializar la memoria física
 static void _inicializar_memoria_fisica(void) {
-    for (int i = 0; i < NUMERO_MARCOS; i++) {
-        memset(memoria_fisica[i].datos, 0, TAMANO_PAGINA);
+    for (int i = 0; i < TAMANIO_MARCOS; i++) {
+        memset(memoria_fisica[i].datos, 0, TAMANIO_PAGINA);
         memoria_fisica[i].id_proceso = -1;
         memoria_fisica[i].numero_pagina = 0;
         memoria_fisica[i].libre = true;
@@ -41,13 +41,13 @@ static void _inicializar_memoria_fisica(void) {
         memoria_fisica[i].id_proceso = 0;  // Kernel
     }
     
-    estadisticas.paginas_libres = NUMERO_MARCOS - 4;
+    estadisticas.paginas_libres = TAMANIO_MARCOS - 4;
     estadisticas.paginas_usadas = 4;
 }
 
 // Buscar un marco libre
 static int _buscar_marco_libre(void) {
-    for (int i = 4; i < NUMERO_MARCOS; i++) {
+    for (int i = 4; i < TAMANIO_MARCOS; i++) {
         if (memoria_fisica[i].libre) {
             return i;
         }
@@ -57,16 +57,16 @@ static int _buscar_marco_libre(void) {
 
 // Algoritmo de reloj (Second-Chance / Clock) para reemplazo de páginas
 static int _encontrar_victima_lru(void) {
-    static uint32_t manecilla = 0;
-
-    for (int intentos = 0; intentos < NUMERO_MARCOS * 2; intentos++) {
-        manecilla = (manecilla + 1) % NUMERO_MARCOS;
-        if (manecilla < 4) continue;
-
-        if (!memoria_fisica[manecilla].libre) {
-            uint32_t id_proc = memoria_fisica[manecilla].id_proceso;
-            uint32_t num_pag = memoria_fisica[manecilla].numero_pagina;
-
+    // Buscar el marco con el menor contador de referencia (LRU)
+    int victima = -1;
+    uint32_t menor_referencia = 0xFFFFFFFF;
+    
+    for (int i = 4; i < TAMANIO_MARCOS; i++) {
+        if (!memoria_fisica[i].libre) {
+            // Buscar la entrada de página correspondiente
+            uint32_t id_proc = memoria_fisica[i].id_proceso;
+            uint32_t num_pag = memoria_fisica[i].numero_pagina;
+            
             if (id_proc < MAX_PROCESOS && tablas_procesos[id_proc] != NULL) {
                 entrada_pagina_t* pag = &tablas_procesos[id_proc]->paginas[num_pag];
                 if (pag->referenciado) {
@@ -79,9 +79,15 @@ static int _encontrar_victima_lru(void) {
             }
         }
     }
-
-    for (int i = 4; i < NUMERO_MARCOS; i++) {
-        if (!memoria_fisica[i].libre) return i;
+    
+    // Si no encontramos, elegir la que tenga menos referencia
+    if (victima == -1) {
+        for (int i = 4; i < TAMANIO_MARCOS; i++) {
+            if (!memoria_fisica[i].libre) {
+                victima = i;
+                break;
+            }
+        }
     }
     return -1;
 }
@@ -100,11 +106,11 @@ static bool _escribir_swap(uint32_t id_proceso, uint32_t num_pagina, uint8_t* da
     
     // Calcular offset en el archivo swap
     // Formato: [id_proceso][num_pagina][datos]
-    fseek(archivo_swap, (id_proceso * MAX_PAGINAS_POR_PROCESO + num_pagina) * TAMANO_PAGINA, SEEK_SET);
-    size_t escritos = fwrite(datos, 1, TAMANO_PAGINA, archivo_swap);
+    fseek(archivo_swap, (id_proceso * MAX_PAGINAS_POR_PROCESO + num_pagina) * TAMANIO_PAGINA, SEEK_SET);
+    size_t escritos = fwrite(datos, 1, TAMANIO_PAGINA, archivo_swap);
     fflush(archivo_swap);
     
-    return escritos == TAMANO_PAGINA;
+    return escritos == TAMANIO_PAGINA;
 }
 
 // Leer una página del swap
@@ -113,10 +119,10 @@ static bool _leer_swap(uint32_t id_proceso, uint32_t num_pagina, uint8_t* buffer
         return false;
     }
     
-    fseek(archivo_swap, (id_proceso * MAX_PAGINAS_POR_PROCESO + num_pagina) * TAMANO_PAGINA, SEEK_SET);
-    size_t leidos = fread(buffer, 1, TAMANO_PAGINA, archivo_swap);
+    fseek(archivo_swap, (id_proceso * MAX_PAGINAS_POR_PROCESO + num_pagina) * TAMANIO_PAGINA, SEEK_SET);
+    size_t leidos = fread(buffer, 1, TAMANIO_PAGINA, archivo_swap);
     
-    return leidos == TAMANO_PAGINA;
+    return leidos == TAMANIO_PAGINA;
 }
 
 // ============================================
@@ -126,18 +132,18 @@ static bool _leer_swap(uint32_t id_proceso, uint32_t num_pagina, uint8_t* buffer
 bool memoria_inicializar(void) {
     printf("[MEMORIA] Inicializando sistema de memoria para RefugioOS...\n");
     
-    // Inicializar estructuras
+    // Inicializar estadísticas primero
+    memset(&estadisticas, 0, sizeof(estadisticas_memoria_t));
+    estadisticas.paginas_totales = TAMANIO_MARCOS;
+    estadisticas.memoria_total_bytes = TAMANIO_MEMORIA;
+
+    // Inicializar estructuras (esto configura paginas_usadas/libres reales)
     _inicializar_memoria_fisica();
-    
+
     for (int i = 0; i < MAX_PROCESOS; i++) {
         tablas_procesos[i] = NULL;
     }
-    
-    // Inicializar estadísticas
-    memset(&estadisticas, 0, sizeof(estadisticas_memoria_t));
-    estadisticas.paginas_totales = NUMERO_MARCOS;
-    estadisticas.memoria_total_bytes = TAMANO_MEMORIA;
-    
+
     // Abrir archivo swap
     archivo_swap = fopen(NOMBRE_SWAP, "w+b");
     if (archivo_swap == NULL) {
@@ -146,8 +152,8 @@ bool memoria_inicializar(void) {
     }
     
     printf("[MEMORIA] Sistema inicializado correctamente\n");
-    printf("[MEMORIA] Memoria total: %u KB (%u páginas)\n", 
-           TAMANO_MEMORIA / 1024, NUMERO_MARCOS);
+    printf("[MEMORIA] Memoria total: %d KB (%d páginas)\n", 
+           TAMANIO_MEMORIA / 1024, TAMANIO_MARCOS);
     printf("[MEMORIA] Swap activo: %s\n", NOMBRE_SWAP);
     
     return true;
@@ -220,7 +226,7 @@ bool memoria_destruir_proceso(uint32_t id_proceso) {
     for (int i = 0; i < MAX_PAGINAS_POR_PROCESO; i++) {
         if (tabla->paginas[i].presente) {
             int marco = tabla->paginas[i].marco_fisico;
-            if (marco >= 0 && marco < NUMERO_MARCOS) {
+            if (marco >= 0 && marco < TAMANIO_MARCOS) {
                 memoria_fisica[marco].libre = true;
                 memoria_fisica[marco].id_proceso = -1;
                 estadisticas.paginas_usadas--;
@@ -242,7 +248,7 @@ void* memoria_asignar(uint32_t id_proceso, uint32_t tamaño_bytes) {
     }
     
     tabla_paginas_t* tabla = tablas_procesos[id_proceso];
-    uint32_t paginas_necesarias = (tamaño_bytes + TAMANO_PAGINA - 1) / TAMANO_PAGINA;
+    uint32_t paginas_necesarias = (tamaño_bytes + TAMANIO_PAGINA - 1) / TAMANIO_PAGINA;
     uint32_t pagina_inicio = tabla->contador_paginas_usadas;
     
     // Verificar que no exceda el límite
@@ -285,7 +291,7 @@ void* memoria_asignar(uint32_t id_proceso, uint32_t tamaño_bytes) {
         }
         
         // Inicializar la página nueva
-        memset(memoria_fisica[marco].datos, 0, TAMANO_PAGINA);
+        memset(memoria_fisica[marco].datos, 0, TAMANIO_PAGINA);
         memoria_fisica[marco].libre = false;
         memoria_fisica[marco].id_proceso = id_proceso;
         memoria_fisica[marco].numero_pagina = num_pagina;
@@ -304,8 +310,8 @@ void* memoria_asignar(uint32_t id_proceso, uint32_t tamaño_bytes) {
     tabla->contador_paginas_usadas += paginas_necesarias;
     
     // Devolver la dirección virtual del inicio
-    uint32_t direccion_virtual = pagina_inicio * TAMANO_PAGINA;
-    printf("[MEMORIA] Asignados %u bytes al proceso %u en dirección virtual 0x%X\n", 
+    uint32_t direccion_virtual = pagina_inicio * TAMANIO_PAGINA;
+    printf("[MEMORIA] Asignados %d bytes al proceso %d en dirección virtual 0x%X\n", 
            tamaño_bytes, id_proceso, direccion_virtual);
     
     return (void*)(uintptr_t)direccion_virtual;
@@ -317,7 +323,7 @@ bool memoria_liberar(uint32_t id_proceso, void* direccion_virtual) {
     }
     
     uint32_t dir = (uint32_t)(uintptr_t)direccion_virtual;
-    uint32_t num_pagina = dir / TAMANO_PAGINA;
+    uint32_t num_pagina = dir / TAMANIO_PAGINA;
     
     if (num_pagina >= MAX_PAGINAS_POR_PROCESO) {
         return false;
@@ -330,7 +336,7 @@ bool memoria_liberar(uint32_t id_proceso, void* direccion_virtual) {
     }
     
     int marco = tabla->paginas[num_pagina].marco_fisico;
-    if (marco >= 0 && marco < NUMERO_MARCOS) {
+    if (marco >= 0 && marco < TAMANIO_MARCOS) {
         memoria_fisica[marco].libre = true;
         memoria_fisica[marco].id_proceso = -1;
         estadisticas.paginas_usadas--;
@@ -349,8 +355,8 @@ uint8_t memoria_leer_byte(uint32_t id_proceso, void* direccion_virtual) {
     }
     
     uint32_t dir = (uint32_t)(uintptr_t)direccion_virtual;
-    uint32_t num_pagina = dir / TAMANO_PAGINA;
-    uint32_t offset = dir % TAMANO_PAGINA;
+    uint32_t num_pagina = dir / TAMANIO_PAGINA;
+    uint32_t offset = dir % TAMANIO_PAGINA;
     
     tabla_paginas_t* tabla = tablas_procesos[id_proceso];
     entrada_pagina_t* pag = &tabla->paginas[num_pagina];
@@ -364,7 +370,7 @@ uint8_t memoria_leer_byte(uint32_t id_proceso, void* direccion_virtual) {
     pag->referenciado = 1;
     
     // Leer el byte
-    uint32_t direccion_fisica = (pag->marco_fisico * TAMANO_PAGINA) + offset;
+    uint32_t direccion_fisica = (pag->marco_fisico * TAMANIO_PAGINA) + offset;
     return memoria_fisica[pag->marco_fisico].datos[offset];
 }
 
@@ -374,8 +380,8 @@ bool memoria_escribir_byte(uint32_t id_proceso, void* direccion_virtual, uint8_t
     }
     
     uint32_t dir = (uint32_t)(uintptr_t)direccion_virtual;
-    uint32_t num_pagina = dir / TAMANO_PAGINA;
-    uint32_t offset = dir % TAMANO_PAGINA;
+    uint32_t num_pagina = dir / TAMANIO_PAGINA;
+    uint32_t offset = dir % TAMANIO_PAGINA;
     
     tabla_paginas_t* tabla = tablas_procesos[id_proceso];
     entrada_pagina_t* pag = &tabla->paginas[num_pagina];
@@ -390,14 +396,14 @@ bool memoria_escribir_byte(uint32_t id_proceso, void* direccion_virtual, uint8_t
     pag->modificado = 1;
     
     // Escribir el byte
-    uint32_t direccion_fisica = (pag->marco_fisico * TAMANO_PAGINA) + offset;
+    uint32_t direccion_fisica = (pag->marco_fisico * TAMANIO_PAGINA) + offset;
     memoria_fisica[pag->marco_fisico].datos[offset] = valor;
     
     return true;
 }
 
 bool _memoria_manejar_page_fault(tabla_paginas_t* tabla, uint32_t direccion_virtual) {
-    uint32_t num_pagina = direccion_virtual / TAMANO_PAGINA;
+    uint32_t num_pagina = direccion_virtual / TAMANIO_PAGINA;
     estadisticas.page_faults++;
     
     if (num_pagina >= MAX_PAGINAS_POR_PROCESO) {
@@ -439,7 +445,7 @@ bool _memoria_manejar_page_fault(tabla_paginas_t* tabla, uint32_t direccion_virt
     if (pag->en_swap) {
         _leer_swap(tabla->id_proceso, num_pagina, memoria_fisica[marco].datos);
     } else {
-        memset(memoria_fisica[marco].datos, 0, TAMANO_PAGINA);
+        memset(memoria_fisica[marco].datos, 0, TAMANIO_PAGINA);
     }
     
     // Actualizar estructuras
@@ -466,14 +472,14 @@ void memoria_imprimir_estado(void) {
     printf("\n========================================\n");
     printf("      ESTADO DE MEMORIA - REFUGIO OS\n");
     printf("========================================\n");
-    printf("Memoria total:       %u KB\n", TAMANO_MEMORIA / 1024);
-    printf("Páginas totales:     %u\n", estadisticas.paginas_totales);
-    printf("Páginas usadas:      %u\n", estadisticas.paginas_usadas);
-    printf("Páginas libres:      %u\n", estadisticas.paginas_libres);
-    printf("Page faults:         %u\n", estadisticas.page_faults);
-    printf("Swaps realizados:    %u\n", estadisticas.swaps_realizados);
+    printf("Memoria total:       %d KB\n", TAMANIO_MEMORIA / 1024);
+    printf("Páginas totales:     %d\n", estadisticas.paginas_totales);
+    printf("Páginas usadas:      %d\n", estadisticas.paginas_usadas);
+    printf("Páginas libres:      %d\n", estadisticas.paginas_libres);
+    printf("Page faults:         %d\n", estadisticas.page_faults);
+    printf("Swaps realizados:    %d\n", estadisticas.swaps_realizados);
     printf("Memoria usada:       %.2f KB\n", 
-           (float)estadisticas.paginas_usadas * TAMANO_PAGINA / 1024);
+           (float)estadisticas.paginas_usadas * TAMANIO_PAGINA / 1024);
     
     printf("\nPROCESOS ACTIVOS:\n");
     for (int i = 0; i < MAX_PROCESOS; i++) {

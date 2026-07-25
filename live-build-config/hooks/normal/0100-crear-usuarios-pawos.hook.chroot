@@ -1,21 +1,18 @@
-#!/bin/sh
+#!/bin/bash
 set -e
-
-# Crear grupos de roles para PawOS
-addgroup --system pawos-admin
-addgroup --system pawos-veterinario
-addgroup --system pawos-voluntario
-
-# Crear usuarios de ejemplo
-adduser --system --ingroup pawos-admin admin_refugio
-adduser --system --ingroup pawos-veterinario veterinario1
-adduser --system --ingroup pawos-voluntario voluntario1
-
-# Agregar usuarios a sus grupos secundarios
-adduser admin_refugio pawos-admin
-adduser veterinario1 pawos-veterinario
-adduser voluntario1 pawos-voluntario
-
-# Crear directorio de datos
+for g in pawos-admin pawos-veterinario pawos-voluntario; do
+    getent group "$g" >/dev/null || groupadd "$g"
+done
+crear_usuario() {
+local user=$1 grupo=$2 pass=$3
+    if ! id "$user" &>/dev/null; then
+        useradd -m -G "$grupo" -s /bin/bash "$user"
+        echo "${user}:${pass}" | chpasswd
+fi
+}
+crear_usuario admin_refugio  pawos-admin       admin123
+crear_usuario veterinario1   pawos-veterinario vet123
+crear_usuario voluntario1    pawos-voluntario  vol123
 mkdir -p /var/pawos/reportes
-chmod 777 /var/pawos
+chown -R root:pawos-admin /var/pawos
+chmod -R 2770 /var/pawos

@@ -7,6 +7,35 @@
 #include <stdlib.h>
 #include "../include/ui.h"
 
+/* Barra superior solida (todo el ancho) con el titulo centrado,
+ * mas los bordes laterales y las lineas que cierran arriba/abajo. */
+static void marco(const char *titulo) {
+    attron(COLOR_PAIR(CP_TITULO) | A_BOLD);
+    for (int x = 0; x < COLS; x++) mvaddch(0, x, ' ');
+    mvprintw(0, (COLS - (int)strlen(titulo)) / 2, "%s", titulo);
+    attroff(COLOR_PAIR(CP_TITULO) | A_BOLD);
+
+    attron(COLOR_PAIR(CP_BORDE));
+    for (int y = 1; y < LINES - 1; y++) {
+        mvaddch(y, 0, ACS_VLINE);
+        mvaddch(y, COLS - 1, ACS_VLINE);
+    }
+    mvhline(1, 1, ACS_HLINE, COLS - 2);
+    mvhline(LINES - 2, 1, ACS_HLINE, COLS - 2);
+    mvaddch(1, 0, ACS_LTEE);
+    mvaddch(1, COLS - 1, ACS_RTEE);
+    mvaddch(LINES - 2, 0, ACS_LTEE);
+    mvaddch(LINES - 2, COLS - 1, ACS_RTEE);
+    attroff(COLOR_PAIR(CP_BORDE));
+}
+
+/* Linea de ayuda centrada, debajo del marco */
+static void pie(const char *texto) {
+    attron(COLOR_PAIR(CP_BORDE));
+    mvprintw(LINES - 1, (COLS - (int)strlen(texto)) / 2, "%s", texto);
+    attroff(COLOR_PAIR(CP_BORDE));
+}
+
 void ui_iniciar(void) {
     initscr();
     cbreak();
@@ -21,6 +50,7 @@ void ui_iniciar(void) {
         init_pair(CP_SEL,    COLOR_BLACK, COLOR_CYAN);
         init_pair(CP_OK,     COLOR_GREEN, COLOR_BLACK);
         init_pair(CP_ERROR,  COLOR_RED,   COLOR_BLACK);
+        init_pair(CP_BORDE,  COLOR_CYAN,  COLOR_BLACK);
     }
 }
 
@@ -34,17 +64,29 @@ int ui_menu(const char *titulo, const char *opciones[], int n) {
 
     while (1) {
         clear();
-        attron(COLOR_PAIR(CP_TITULO));
-        mvprintw(1, 2, " %s ", titulo);
-        for (int i = strlen(titulo) + 4; i < COLS - 2; i++) mvprintw(1, i, " ");
-        attroff(COLOR_PAIR(CP_TITULO));
+        marco(titulo);
+
+        int inicio = 3;
+        int ancho = COLS - 6;
+        if (ancho > 60) ancho = 60;
 
         for (int i = 0; i < n; i++) {
-            if (i == sel) attron(COLOR_PAIR(CP_SEL));
-            mvprintw(3 + i * 2, 4, "%-50s", opciones[i]);
-            if (i == sel) attroff(COLOR_PAIR(CP_SEL));
+            int fila = inicio + i * 2;
+            char linea[80];
+            snprintf(linea, sizeof(linea), "%02d. %s", i + 1, opciones[i]);
+
+            if (i == sel) {
+                attron(COLOR_PAIR(CP_SEL) | A_BOLD);
+                mvprintw(fila, 3, " %-*s", ancho, linea);
+                attroff(COLOR_PAIR(CP_SEL) | A_BOLD);
+            } else {
+                attron(COLOR_PAIR(CP_MENU));
+                mvprintw(fila, 3, " %-*s", ancho, linea);
+                attroff(COLOR_PAIR(CP_MENU));
+            }
         }
-        mvprintw(3 + n * 2 + 1, 4, "Flechas: moverse | Enter: seleccionar | q: salir/volver");
+
+        pie("Flechas: moverse | Enter: seleccionar | q: salir/volver");
         refresh();
 
         ch = getch();
@@ -56,22 +98,27 @@ int ui_menu(const char *titulo, const char *opciones[], int n) {
 }
 
 void ui_mensaje(const char *msg, int es_error) {
-    int fila = LINES / 2;
     clear();
-    attron(COLOR_PAIR(es_error ? CP_ERROR : CP_OK));
-    mvprintw(fila, 4, "%s", msg);
-    attroff(COLOR_PAIR(es_error ? CP_ERROR : CP_OK));
-    mvprintw(fila + 2, 4, "Presione una tecla para continuar...");
+    marco(es_error ? "Aviso" : "Listo");
+
+    int fila = LINES / 2;
+    int len = (int)strlen(msg);
+    attron(COLOR_PAIR(es_error ? CP_ERROR : CP_OK) | A_BOLD);
+    mvprintw(fila, (COLS - len) / 2, "%s", msg);
+    attroff(COLOR_PAIR(es_error ? CP_ERROR : CP_OK) | A_BOLD);
+
+    pie("Presione una tecla para continuar...");
     refresh();
     getch();
 }
 
 void ui_pedir_texto(const char *etiqueta, char *out, int maxlen) {
+    clear();
+    marco("Ingresar datos");
     echo();
     curs_set(1);
-    clear();
-    mvprintw(2, 4, "%s", etiqueta);
-    move(4, 4);
+    mvprintw(3, 3, "%s", etiqueta);
+    move(5, 3);
     getnstr(out, maxlen - 1);
     noecho();
     curs_set(0);
@@ -91,13 +138,30 @@ double ui_pedir_double(const char *etiqueta) {
 
 void ui_bienvenida(const char *usuario, const char *rol) {
     clear();
-    int fila = LINES / 2 - 3;
+    marco("PawOS - Refugio de Proteccion Animal");
+
+    int fila = LINES / 2 - 5;
+    const char *arte[] = {
+        " /\\_/\\ ",
+        "( o.o )",
+        " > ^ < "
+    };
+    for (int i = 0; i < 3; i++) {
+        attron(COLOR_PAIR(CP_OK) | A_BOLD);
+        mvprintw(fila + i, (COLS - (int)strlen(arte[i])) / 2, "%s", arte[i]);
+        attroff(COLOR_PAIR(CP_OK) | A_BOLD);
+    }
+
     attron(COLOR_PAIR(CP_TITULO) | A_BOLD);
-    mvprintw(fila, (COLS - 24) / 2, "  P a w O S  -  R e f u g i o  ");
+    mvprintw(fila + 4, (COLS - 11) / 2, " P a w O S ");
     attroff(COLOR_PAIR(CP_TITULO) | A_BOLD);
-    mvprintw(fila + 2, (COLS - 40) / 2, "Bienvenido/a, %s", usuario);
-    mvprintw(fila + 3, (COLS - 40) / 2, "Rol: %s", rol);
-    mvprintw(fila + 5, (COLS - 40) / 2, "Presione una tecla para continuar...");
+
+    attron(A_BOLD);
+    mvprintw(fila + 6, (COLS - 40) / 2, "Bienvenido/a, %s", usuario);
+    mvprintw(fila + 7, (COLS - 40) / 2, "Rol: %s", rol);
+    attroff(A_BOLD);
+
+    pie("Presione una tecla para continuar...");
     refresh();
     getch();
 }
