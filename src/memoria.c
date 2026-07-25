@@ -55,7 +55,7 @@ static int _buscar_marco_libre(void) {
     return -1;  // No hay marcos libres
 }
 
-// Algoritmo LRU para reemplazo de páginas
+// Algoritmo de reloj (Second-Chance / Clock) para reemplazo de páginas
 static int _encontrar_victima_lru(void) {
     int victima = -1;
     uint32_t menor_referencia = 0xFFFFFFFF;
@@ -67,11 +67,14 @@ static int _encontrar_victima_lru(void) {
 
             if (id_proc < MAX_PROCESOS && tablas_procesos[id_proc] != NULL) {
                 entrada_pagina_t* pag = &tablas_procesos[id_proc]->paginas[num_pag];
-
+                
+                // Si no ha sido referenciada, es candidata
                 if (pag->referenciado == 0) {
                     if (pag->modificado == 0) {
+                        // No modificada → mejor candidata
                         return i;
                     }
+                    // Modificada pero no referenciada
                     if (pag->modificado < menor_referencia) {
                         menor_referencia = pag->modificado;
                         victima = i;
@@ -89,7 +92,7 @@ static int _encontrar_victima_lru(void) {
             }
         }
     }
-
+    
     return victima;
 }
 
@@ -198,9 +201,9 @@ tabla_paginas_t* memoria_crear_proceso(uint32_t id_proceso) {
     tablas_procesos[id_proceso] = tabla;
 
     estadisticas.paginas_usadas++;
-    if (estadisticas.paginas_libres > 0) estadisticas.paginas_libres--;
-
-    printf("[MEMORIA] Proceso %u creado con 1 página (marco %d)\n", id_proceso, marco);
+    estadisticas.paginas_libres--;
+    
+    printf("[MEMORIA] Proceso %d creado con 1 página (marco %d)\n", id_proceso, marco);
     return tabla;
 }
 
@@ -225,8 +228,8 @@ bool memoria_destruir_proceso(uint32_t id_proceso) {
 
     free(tabla);
     tablas_procesos[id_proceso] = NULL;
-
-    printf("[MEMORIA] Proceso %u destruido, memoria liberada\n", id_proceso);
+    
+    printf("[MEMORIA] Proceso %d destruido, memoria liberada\n", id_proceso);
     return true;
 }
 
@@ -249,7 +252,8 @@ void* memoria_asignar(uint32_t id_proceso, uint32_t tamaño_bytes) {
         int marco = _buscar_marco_libre();
 
         if (marco == -1) {
-            printf("[MEMORIA] Sin marcos libres, usando LRU para proceso %u\n", id_proceso);
+            // No hay marcos libres → usar swap con LRU
+            printf("[MEMORIA] Sin marcos libres, usando LRU para proceso %d\n", id_proceso);
             marco = _encontrar_victima_lru();
 
             if (marco == -1) {
@@ -325,7 +329,8 @@ bool memoria_liberar(uint32_t id_proceso, void* direccion_virtual) {
     }
 
     memset(&tabla->paginas[num_pagina], 0, sizeof(entrada_pagina_t));
-
+    tabla->contador_paginas_usadas--;
+    
     return true;
 }
 
@@ -409,8 +414,9 @@ bool _memoria_manejar_page_fault(tabla_paginas_t* tabla, uint32_t direccion_virt
             estadisticas.paginas_libres++;
         }
     }
-
-    if (pag->en_swap) {
+    
+    // Leer del swap o iniciar página vacía
+    if (pag->swap_ubicacion != 0) {
         _leer_swap(tabla->id_proceso, num_pagina, memoria_fisica[marco].datos);
     } else {
         memset(memoria_fisica[marco].datos, 0, TAMANIO_PAGINA);
