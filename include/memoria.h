@@ -8,9 +8,9 @@
 // ==========================================
 // CONSTANTES DEL SISTEMA DE MEMORIA
 // ==========================================
-#define TAMANO_PAGINA 4096               // 4 KB (estandar de x86)
-#define NUMERO_MARCOS 1024               // 4 MB de RAM total (para pruebas)
-#define TAMANO_MEMORIA (TAMANO_PAGINA * NUMERO_MARCOS) // 4 MB de RAM total
+#define TAMANIO_PAGINA 4096               // 4 KB (estandar de x86)
+#define TAMANIO_MARCOS 1024               // 4 MB de RAM total (para pruebas)
+#define TAMANIO_MEMORIA (TAMANIO_PAGINA * TAMANIO_MARCOS) // 4 MB de RAM total
 
 #define MAX_PROCESOS 16                  // Maximo de procesos simultaneos
 #define MAX_PAGINAS_POR_PROCESO 64       // 256 KB por proceso (64 paginas de 4 KB)
