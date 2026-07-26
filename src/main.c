@@ -16,6 +16,7 @@
 #include "../include/pantalla_procesos.h"
 #include "../include/pantalla_memoria.h"
 #include "../include/memoria.h"
+#include "../include/pantalla_login.h"
 
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
 
@@ -36,10 +37,15 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Aviso: no se pudo inicializar el sistema de memoria.\n");
     }
 
-    ui_iniciar();
-    
-    const char *usuario = auth_usuario_actual();
-    Rol rol = auth_rol_actual();
+ui_iniciar();
+
+    char usuario[32];
+    Rol rol;
+    if (!pantalla_login(usuario, sizeof(usuario), &rol)) {
+        ui_finalizar();
+        db_close();
+        return 0;
+    }
     ui_bienvenida(usuario, auth_rol_nombre(rol));
 
     while (1) {
