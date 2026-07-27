@@ -4,13 +4,13 @@ live-build-config/binary/
 live-build-config/.build/
 *.iso
 *.o
-pawos-refugio
-pawos.db
+/pawos-refugio
+/pawos.db
 
 archivos_pawos/
 reporte_actual.txt
 
-pawos-vacunas-check
-refugio_swap.bin
+/pawos-vacunas-check
+/refugio_swap.bin
 alertas_vacunas.log
 *.log
