@@ -9,3 +9,8 @@ pawos.db
 
 archivos_pawos/
 reporte_actual.txt
+
+pawos-vacunas-check
+refugio_swap.bin
+alertas_vacunas.log
+*.log
