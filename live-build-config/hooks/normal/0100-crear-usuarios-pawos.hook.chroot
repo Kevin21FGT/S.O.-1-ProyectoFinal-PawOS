@@ -16,3 +16,12 @@ crear_usuario voluntario1    pawos-voluntario  vol123
 mkdir -p /var/pawos/reportes
 chown -R root:pawos-admin /var/pawos
 chmod -R 2770 /var/pawos
+
+
+mkdir -p /etc/sudoers.d
+cat > /etc/sudoers.d/pawos-apagar << 'SUDOEOF'
+%pawos-admin ALL=(ALL) NOPASSWD: /sbin/poweroff, /sbin/reboot
+%pawos-veterinario ALL=(ALL) NOPASSWD: /sbin/poweroff, /sbin/reboot
+%pawos-voluntario ALL=(ALL) NOPASSWD: /sbin/poweroff, /sbin/reboot
+SUDOEOF
+chmod 440 /etc/sudoers.d/pawos-apagar
