@@ -6,3 +6,6 @@ live-build-config/.build/
 *.o
 pawos-refugio
 pawos.db
+
+archivos_pawos/
+reporte_actual.txt
