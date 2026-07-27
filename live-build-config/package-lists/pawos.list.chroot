@@ -1,3 +1,4 @@
+
 lightdm
 lightdm-gtk-greeter
 xserver-xorg
@@ -6,3 +7,4 @@ openbox
 xterm
 libncurses6
 libsqlite3-0
+pcmanfm
