@@ -14,3 +14,5 @@ reporte_actual.txt
 /refugio_swap.bin
 alertas_vacunas.log
 *.log
+donantes.checksum
+
