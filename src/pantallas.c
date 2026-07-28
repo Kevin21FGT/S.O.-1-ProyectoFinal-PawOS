@@ -3,7 +3,6 @@
  * Aqui se conecta la interfaz ncurses (ui.h) con la capa de datos (db.h),
  * respetando el rol del usuario que inicio sesion (auth.h).
  */
-
 #include <ncurses.h>
 #include <string.h>
 #include <stdlib.h>
@@ -11,15 +10,13 @@
 #include "../include/pantallas.h"
 #include "../include/ui.h"
 #include "../include/db.h"
-
+#include "../include/integridad.h"
 static void hoy(char *buf, int len) {
     time_t t = time(NULL);
     struct tm tmv; localtime_r(&t, &tmv);
     strftime(buf, len, "%Y-%m-%d", &tmv);
 }
-
 /* ---------------- Mascotas ---------------- */
-
 static void listar_mascotas_pantalla(void) {
     Mascota *ms; int n;
     mascota_listar(&ms, &n);
@@ -37,7 +34,6 @@ static void listar_mascotas_pantalla(void) {
     getch();
     free(ms);
 }
-
 static void agregar_mascota_pantalla(void) {
     Mascota m; memset(&m, 0, sizeof(m));
     ui_pedir_texto("Nombre de la mascota:", m.nombre, sizeof(m.nombre));
@@ -46,13 +42,11 @@ static void agregar_mascota_pantalla(void) {
     m.edad = ui_pedir_entero("Edad (anios):");
     strcpy(m.estado, "disponible");
     hoy(m.fecha_ingreso, sizeof(m.fecha_ingreso));
-
     if (mascota_agregar(&m) == 0)
         ui_mensaje("Mascota registrada correctamente.", 0);
     else
         ui_mensaje("Error al registrar la mascota.", 1);
 }
-
 static void cambiar_estado_pantalla(void) {
     int id = ui_pedir_entero("ID de la mascota:");
     Mascota m;
@@ -68,7 +62,6 @@ static void cambiar_estado_pantalla(void) {
     else
         ui_mensaje("No se pudo actualizar.", 1);
 }
-
 static void eliminar_mascota_pantalla(void) {
     int id = ui_pedir_entero("ID de la mascota a eliminar:");
     if (mascota_eliminar(id) == 0)
@@ -76,7 +69,6 @@ static void eliminar_mascota_pantalla(void) {
     else
         ui_mensaje("No se pudo eliminar.", 1);
 }
-
 void pantalla_mascotas(Rol rol) {
     while (1) {
         const char *base[] = {
@@ -86,7 +78,7 @@ void pantalla_mascotas(Rol rol) {
             "Eliminar mascota",
             "Volver"
         };
-        int n = (rol == ROL_VOLUNTARIO) ? 3 : 5; /* voluntario no elimina ni cambia estado libremente */
+        int n = (rol == ROL_VOLUNTARIO) ? 3 : 5;
         const char *opciones[5];
         opciones[0] = base[0];
         opciones[1] = base[1];
@@ -97,24 +89,19 @@ void pantalla_mascotas(Rol rol) {
             opciones[3] = base[3];
             opciones[4] = base[4];
         }
-
         int sel = ui_menu("Gestion de Mascotas", opciones, n);
         if (sel < 0 || opciones[sel] == base[4]) return;
-
         if (opciones[sel] == base[0]) listar_mascotas_pantalla();
         else if (opciones[sel] == base[1]) agregar_mascota_pantalla();
         else if (opciones[sel] == base[2]) cambiar_estado_pantalla();
         else if (opciones[sel] == base[3]) eliminar_mascota_pantalla();
     }
 }
-
 /* ---------------- Vacunas ---------------- */
-
 static void listar_vacunas_pantalla(int solo_pendientes) {
     Vacuna *vs; int n;
     if (solo_pendientes) vacuna_pendientes(&vs, &n);
     else vacuna_listar(&vs, &n);
-
     clear();
     mvprintw(1, 2, solo_pendientes ? "Vacunas pendientes/vencidas (%d)" : "Todas las vacunas (%d)", n);
     mvprintw(3, 2, "%-4s %-6s %-18s %-12s %-12s", "ID", "MascID", "Vacuna", "Aplicada", "Proxima");
@@ -129,7 +116,6 @@ static void listar_vacunas_pantalla(int solo_pendientes) {
     getch();
     free(vs);
 }
-
 static void agregar_vacuna_pantalla(void) {
     Vacuna v; memset(&v, 0, sizeof(v));
     v.mascota_id = ui_pedir_entero("ID de la mascota:");
@@ -141,31 +127,25 @@ static void agregar_vacuna_pantalla(void) {
     ui_pedir_texto("Nombre de la vacuna:", v.nombre_vacuna, sizeof(v.nombre_vacuna));
     ui_pedir_texto("Fecha de aplicacion (YYYY-MM-DD):", v.fecha_aplicacion, sizeof(v.fecha_aplicacion));
     ui_pedir_texto("Proxima dosis (YYYY-MM-DD, opcional):", v.fecha_proxima, sizeof(v.fecha_proxima));
-
     if (vacuna_agregar(&v) == 0)
         ui_mensaje("Vacuna registrada.", 0);
     else
         ui_mensaje("Error al registrar la vacuna.", 1);
 }
-
 void pantalla_vacunas(Rol rol) {
     while (1) {
         const char *op_admin[] = {"Ver todas", "Ver pendientes/vencidas", "Registrar vacuna", "Volver"};
         const char *op_vol[]   = {"Ver todas", "Ver pendientes/vencidas", "Volver"};
         const char **opciones = (rol == ROL_VOLUNTARIO) ? op_vol : op_admin;
         int n = (rol == ROL_VOLUNTARIO) ? 3 : 4;
-
         int sel = ui_menu("Agenda de Vacunas", opciones, n);
         if (sel < 0 || sel == n - 1) return;
-
         if (sel == 0) listar_vacunas_pantalla(0);
         else if (sel == 1) listar_vacunas_pantalla(1);
         else if (sel == 2 && rol != ROL_VOLUNTARIO) agregar_vacuna_pantalla();
     }
 }
-
 /* ---------------- Adopciones ---------------- */
-
 static void listar_adopciones_pantalla(void) {
     Adopcion *ad; int n;
     adopcion_listar(&ad, &n);
@@ -183,7 +163,6 @@ static void listar_adopciones_pantalla(void) {
     getch();
     free(ad);
 }
-
 static void registrar_adopcion_pantalla(void) {
     Adopcion a; memset(&a, 0, sizeof(a));
     a.mascota_id = ui_pedir_entero("ID de la mascota a adoptar:");
@@ -199,14 +178,13 @@ static void registrar_adopcion_pantalla(void) {
     ui_pedir_texto("Nombre del adoptante:", a.adoptante_nombre, sizeof(a.adoptante_nombre));
     ui_pedir_texto("Contacto del adoptante:", a.adoptante_contacto, sizeof(a.adoptante_contacto));
     hoy(a.fecha_adopcion, sizeof(a.fecha_adopcion));
-
     if (adopcion_registrar(&a) == 0)
         ui_mensaje("Adopcion registrada. La mascota ahora figura como adoptada.", 0);
     else
         ui_mensaje("Error al registrar la adopcion.", 1);
 }
-
 void pantalla_adopciones(Rol rol) {
+    (void)rol;
     while (1) {
         const char *opciones[] = {"Ver listado", "Registrar adopcion", "Volver"};
         int sel = ui_menu("Control de Adopciones", opciones, 3);
@@ -215,9 +193,7 @@ void pantalla_adopciones(Rol rol) {
         else if (sel == 1) registrar_adopcion_pantalla();
     }
 }
-
 /* ---------------- Donantes ---------------- */
-
 static void listar_donantes_pantalla(void) {
     Donante *ds; int n;
     donante_listar(&ds, &n);
@@ -236,20 +212,34 @@ static void listar_donantes_pantalla(void) {
     getch();
     free(ds);
 }
-
 static void agregar_donante_pantalla(void) {
     Donante d; memset(&d, 0, sizeof(d));
     ui_pedir_texto("Nombre del donante:", d.nombre, sizeof(d.nombre));
     ui_pedir_texto("Contacto:", d.contacto, sizeof(d.contacto));
     d.monto = ui_pedir_double("Monto donado:");
     hoy(d.fecha, sizeof(d.fecha));
-
     if (donante_agregar(&d) == 0)
         ui_mensaje("Donante registrado.", 0);
     else
         ui_mensaje("Error al registrar el donante.", 1);
 }
-
+static void verificar_integridad_donantes_pantalla(void) {
+    int r = integridad_verificar_donantes();
+    if (r == 0)
+        ui_mensaje("Integridad verificada: los datos de donantes no han cambiado.", 0);
+    else if (r == 2)
+        ui_mensaje("No habia checksum previo. Se guardo uno nuevo como base.", 0);
+    else if (r == 1)
+        ui_mensaje("ALERTA: los datos de donantes cambiaron desde la ultima verificacion.", 1);
+    else
+        ui_mensaje("No se pudo verificar la integridad.", 1);
+}
+static void actualizar_checksum_donantes_pantalla(void) {
+    if (integridad_actualizar_checksum_donantes() == 0)
+        ui_mensaje("Checksum actualizado. Los cambios actuales quedan como nueva base.", 0);
+    else
+        ui_mensaje("No se pudo actualizar el checksum.", 1);
+}
 /* Donantes: informacion sensible -> solo Admin y Veterinario, no Voluntario */
 void pantalla_donantes(Rol rol) {
     if (rol == ROL_VOLUNTARIO) {
@@ -257,16 +247,16 @@ void pantalla_donantes(Rol rol) {
         return;
     }
     while (1) {
-        const char *opciones[] = {"Ver listado", "Registrar donante", "Volver"};
-        int sel = ui_menu("Base de Donantes", opciones, 3);
-        if (sel < 0 || sel == 2) return;
+        const char *opciones[] = {"Ver listado", "Registrar donante", "Verificar integridad", "Actualizar checksum (aceptar cambios)", "Volver"};
+        int sel = ui_menu("Base de Donantes", opciones, 5);
+        if (sel < 0 || sel == 4) return;
         if (sel == 0) listar_donantes_pantalla();
         else if (sel == 1) agregar_donante_pantalla();
+        else if (sel == 2) verificar_integridad_donantes_pantalla();
+        else if (sel == 3) actualizar_checksum_donantes_pantalla();
     }
 }
-
 /* ---------------- Reportes ---------------- */
-
 void pantalla_reportes(Rol rol) {
     if (rol == ROL_VOLUNTARIO) {
         ui_mensaje("Acceso restringido: este modulo requiere rol Admin o Veterinario.", 1);
@@ -278,7 +268,6 @@ void pantalla_reportes(Rol rol) {
         snprintf(msg, sizeof(msg), "Reporte generado en: %s", ruta);
         ui_mensaje(msg, 0);
     } else {
-        /* si /var/pawos no existe (p.ej. corriendo el programa fuera de PawOS), usar carpeta local */
         if (reporte_generar("reporte_actual.txt") == 0)
             ui_mensaje("Reporte generado en: ./reporte_actual.txt", 0);
         else
