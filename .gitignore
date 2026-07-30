@@ -16,3 +16,4 @@ alertas_vacunas.log
 *.log
 donantes.checksum
 
+/pawos-monitoreo

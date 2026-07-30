@@ -12,24 +12,32 @@ ASM_SRC = src/checksum.asm
 ASM_OBJ = $(ASM_SRC:.asm=.o)
 
 BIN = pawos-refugio
+
 DEMONIO_SRC = src/vacunas_demonio.c src/db.c
 DEMONIO_OBJ = $(DEMONIO_SRC:.c=.o)
 DEMONIO_BIN = pawos-vacunas-check
 
-all: $(BIN) $(DEMONIO_BIN)
+MONITOR_SRC = src/servidor_monitoreo.c
+MONITOR_OBJ = $(MONITOR_SRC:.c=.o)
+MONITOR_BIN = pawos-monitoreo
+
+all: $(BIN) $(DEMONIO_BIN) $(MONITOR_BIN)
 
 $(BIN): $(OBJ) $(ASM_OBJ)
 	$(CC) $(OBJ) $(ASM_OBJ) -o $(BIN) $(LDFLAGS)
-
 $(DEMONIO_BIN): $(DEMONIO_OBJ)
 	$(CC) $(DEMONIO_OBJ) -o $(DEMONIO_BIN) -lsqlite3 -lm
+
+$(MONITOR_BIN): $(MONITOR_OBJ)
+	$(CC) $(MONITOR_OBJ) -o $(MONITOR_BIN)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 %.o: %.asm
 	$(NASM) $(NASMFLAGS) $< -o $@
+
 clean:
-	rm -f $(OBJ) $(ASM_OBJ) $(DEMONIO_OBJ) $(BIN) $(DEMONIO_BIN)
+	rm -f $(OBJ) $(ASM_OBJ) $(DEMONIO_OBJ) $(MONITOR_OBJ) $(BIN) $(DEMONIO_BIN) $(MONITOR_BIN)
 
 .PHONY: all clean
