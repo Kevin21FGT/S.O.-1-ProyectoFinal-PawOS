@@ -50,6 +50,9 @@ int  mascota_buscar_por_id(int id, Mascota *out);
 int  vacuna_agregar(const Vacuna *v);
 int  vacuna_listar(Vacuna **out, int *n);
 int  vacuna_pendientes(Vacuna **out, int *n); /* fecha_proxima <= hoy */
+int  vacuna_buscar_por_id(int id, Vacuna *out);
+int  vacuna_actualizar(const Vacuna *v);
+int  vacuna_eliminar(int id);
 
 /* ---------- Adopciones ---------- */
 int  adopcion_registrar(const Adopcion *a);
