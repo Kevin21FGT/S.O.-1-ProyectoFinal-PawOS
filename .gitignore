@@ -17,3 +17,15 @@ alertas_vacunas.log
 donantes.checksum
 
 /pawos-monitoreo
+
+live-build-config/chroot
+live-build-config/source
+live-build-config/config/
+live-build-config/*.files
+live-build-config/*.contents
+live-build-config/*.packages
+live-build-config/*.modified_timestamps
+live-build-config/wget-log*
+live-build-config/pawos.transfer
+
+live-build-config/chroot.packages*
