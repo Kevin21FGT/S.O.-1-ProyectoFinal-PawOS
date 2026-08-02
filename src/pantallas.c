@@ -37,9 +37,13 @@ static void listar_mascotas_pantalla(void) {
 static void agregar_mascota_pantalla(void) {
     Mascota m; memset(&m, 0, sizeof(m));
     ui_pedir_texto("Nombre de la mascota:", m.nombre, sizeof(m.nombre));
+    if (ui_fue_cancelado()) return;
     ui_pedir_texto("Especie (perro/gato/otro):", m.especie, sizeof(m.especie));
+    if (ui_fue_cancelado()) return;
     ui_pedir_texto("Raza (opcional):", m.raza, sizeof(m.raza));
+    if (ui_fue_cancelado()) return;
     m.edad = ui_pedir_entero("Edad (anios):");
+    if (ui_fue_cancelado()) return;
     strcpy(m.estado, "disponible");
     hoy(m.fecha_ingreso, sizeof(m.fecha_ingreso));
     if (mascota_agregar(&m) == 0)
@@ -49,6 +53,7 @@ static void agregar_mascota_pantalla(void) {
 }
 static void cambiar_estado_pantalla(void) {
     int id = ui_pedir_entero("ID de la mascota:");
+    if (ui_fue_cancelado()) return;
     Mascota m;
     if (mascota_buscar_por_id(id, &m) != 0) {
         ui_mensaje("No existe una mascota con ese ID.", 1);
@@ -64,6 +69,7 @@ static void cambiar_estado_pantalla(void) {
 }
 static void eliminar_mascota_pantalla(void) {
     int id = ui_pedir_entero("ID de la mascota a eliminar:");
+    if (ui_fue_cancelado()) return;
     if (mascota_eliminar(id) == 0)
         ui_mensaje("Mascota eliminada.", 0);
     else
@@ -119,30 +125,68 @@ static void listar_vacunas_pantalla(int solo_pendientes) {
 static void agregar_vacuna_pantalla(void) {
     Vacuna v; memset(&v, 0, sizeof(v));
     v.mascota_id = ui_pedir_entero("ID de la mascota:");
+    if (ui_fue_cancelado()) return;
     Mascota m;
     if (mascota_buscar_por_id(v.mascota_id, &m) != 0) {
         ui_mensaje("No existe una mascota con ese ID.", 1);
         return;
     }
     ui_pedir_texto("Nombre de la vacuna:", v.nombre_vacuna, sizeof(v.nombre_vacuna));
+    if (ui_fue_cancelado()) return;
     ui_pedir_texto("Fecha de aplicacion (YYYY-MM-DD):", v.fecha_aplicacion, sizeof(v.fecha_aplicacion));
+    if (ui_fue_cancelado()) return;
     ui_pedir_texto("Proxima dosis (YYYY-MM-DD, opcional):", v.fecha_proxima, sizeof(v.fecha_proxima));
+    if (ui_fue_cancelado()) return;
     if (vacuna_agregar(&v) == 0)
         ui_mensaje("Vacuna registrada.", 0);
     else
         ui_mensaje("Error al registrar la vacuna.", 1);
 }
+static void editar_vacuna_pantalla(void) {
+    int id = ui_pedir_entero("ID de la vacuna a editar:");
+    if (ui_fue_cancelado()) return;
+    Vacuna v;
+    if (vacuna_buscar_por_id(id, &v) != 0) {
+        ui_mensaje("No existe una vacuna con ese ID.", 1);
+        return;
+    }
+    ui_pedir_texto("Nombre de la vacuna:", v.nombre_vacuna, sizeof(v.nombre_vacuna));
+    if (ui_fue_cancelado()) return;
+    ui_pedir_texto("Fecha de aplicacion (YYYY-MM-DD):", v.fecha_aplicacion, sizeof(v.fecha_aplicacion));
+    if (ui_fue_cancelado()) return;
+    ui_pedir_texto("Proxima dosis (YYYY-MM-DD, opcional):", v.fecha_proxima, sizeof(v.fecha_proxima));
+    if (ui_fue_cancelado()) return;
+    if (vacuna_actualizar(&v) == 0)
+        ui_mensaje("Vacuna actualizada.", 0);
+    else
+        ui_mensaje("Error al actualizar la vacuna.", 1);
+}
+static void eliminar_vacuna_pantalla(void) {
+    int id = ui_pedir_entero("ID de la vacuna a eliminar:");
+    if (ui_fue_cancelado()) return;
+    Vacuna v;
+    if (vacuna_buscar_por_id(id, &v) != 0) {
+        ui_mensaje("No existe una vacuna con ese ID.", 1);
+        return;
+    }
+    if (vacuna_eliminar(id) == 0)
+        ui_mensaje("Vacuna eliminada.", 0);
+    else
+        ui_mensaje("Error al eliminar la vacuna.", 1);
+}
 void pantalla_vacunas(Rol rol) {
     while (1) {
-        const char *op_admin[] = {"Ver todas", "Ver pendientes/vencidas", "Registrar vacuna", "Volver"};
+        const char *op_admin[] = {"Ver todas", "Ver pendientes/vencidas", "Registrar vacuna", "Editar vacuna", "Eliminar vacuna", "Volver"};
         const char *op_vol[]   = {"Ver todas", "Ver pendientes/vencidas", "Volver"};
         const char **opciones = (rol == ROL_VOLUNTARIO) ? op_vol : op_admin;
-        int n = (rol == ROL_VOLUNTARIO) ? 3 : 4;
+        int n = (rol == ROL_VOLUNTARIO) ? 3 : 6;
         int sel = ui_menu("Agenda de Vacunas", opciones, n);
         if (sel < 0 || sel == n - 1) return;
         if (sel == 0) listar_vacunas_pantalla(0);
         else if (sel == 1) listar_vacunas_pantalla(1);
         else if (sel == 2 && rol != ROL_VOLUNTARIO) agregar_vacuna_pantalla();
+        else if (sel == 3 && rol != ROL_VOLUNTARIO) editar_vacuna_pantalla();
+        else if (sel == 4 && rol != ROL_VOLUNTARIO) eliminar_vacuna_pantalla();
     }
 }
 /* ---------------- Adopciones ---------------- */
@@ -166,6 +210,7 @@ static void listar_adopciones_pantalla(void) {
 static void registrar_adopcion_pantalla(void) {
     Adopcion a; memset(&a, 0, sizeof(a));
     a.mascota_id = ui_pedir_entero("ID de la mascota a adoptar:");
+    if (ui_fue_cancelado()) return;
     Mascota m;
     if (mascota_buscar_por_id(a.mascota_id, &m) != 0) {
         ui_mensaje("No existe una mascota con ese ID.", 1);
@@ -176,7 +221,9 @@ static void registrar_adopcion_pantalla(void) {
         return;
     }
     ui_pedir_texto("Nombre del adoptante:", a.adoptante_nombre, sizeof(a.adoptante_nombre));
+    if (ui_fue_cancelado()) return;
     ui_pedir_texto("Contacto del adoptante:", a.adoptante_contacto, sizeof(a.adoptante_contacto));
+    if (ui_fue_cancelado()) return;
     hoy(a.fecha_adopcion, sizeof(a.fecha_adopcion));
     if (adopcion_registrar(&a) == 0)
         ui_mensaje("Adopcion registrada. La mascota ahora figura como adoptada.", 0);
@@ -215,8 +262,11 @@ static void listar_donantes_pantalla(void) {
 static void agregar_donante_pantalla(void) {
     Donante d; memset(&d, 0, sizeof(d));
     ui_pedir_texto("Nombre del donante:", d.nombre, sizeof(d.nombre));
+    if (ui_fue_cancelado()) return;
     ui_pedir_texto("Contacto:", d.contacto, sizeof(d.contacto));
+    if (ui_fue_cancelado()) return;
     d.monto = ui_pedir_double("Monto donado:");
+    if (ui_fue_cancelado()) return;
     hoy(d.fecha, sizeof(d.fecha));
     if (donante_agregar(&d) == 0)
         ui_mensaje("Donante registrado.", 0);

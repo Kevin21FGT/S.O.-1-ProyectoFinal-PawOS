@@ -112,27 +112,62 @@ void ui_mensaje(const char *msg, int es_error) {
     getch();
 }
 
-void ui_pedir_texto(const char *etiqueta, char *out, int maxlen) {
+static int g_cancelado = 0;
+
+int ui_fue_cancelado(void) {
+    return g_cancelado;
+}
+
+int ui_pedir_texto(const char *etiqueta, char *out, int maxlen) {
     clear();
     marco("Ingresar datos");
-    echo();
-    curs_set(1);
     mvprintw(3, 3, "%s", etiqueta);
-    move(5, 3);
-    getnstr(out, maxlen - 1);
-    noecho();
+    pie("Escriba el valor | Enter: confirmar | ESC: cancelar");
+    curs_set(1);
+
+    int pos = 0;
+    if (maxlen > 0) out[0] = '\0';
+    g_cancelado = 0;
+
+    while (1) {
+        move(5, 3 + pos);
+        refresh();
+        int ch = getch();
+        if (ch == 27) { /* ESC */
+            g_cancelado = 1;
+            if (maxlen > 0) out[0] = '\0';
+            break;
+        } else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
+            g_cancelado = 0;
+            break;
+        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
+            if (pos > 0) {
+                pos--;
+                out[pos] = '\0';
+                mvaddch(5, 3 + pos, ' ');
+            }
+        } else if (ch >= 32 && ch < 256 && pos < maxlen - 1) {
+            out[pos] = (char)ch;
+            pos++;
+            out[pos] = '\0';
+            mvaddch(5, 3 + pos - 1, ch);
+        }
+    }
     curs_set(0);
+    return g_cancelado ? -1 : 0;
 }
 
 int ui_pedir_entero(const char *etiqueta) {
     char buf[32];
     ui_pedir_texto(etiqueta, buf, sizeof(buf));
+    if (g_cancelado) return 0;
     return atoi(buf);
 }
 
 double ui_pedir_double(const char *etiqueta) {
     char buf[32];
     ui_pedir_texto(etiqueta, buf, sizeof(buf));
+    if (g_cancelado) return 0.0;
     return atof(buf);
 }
 

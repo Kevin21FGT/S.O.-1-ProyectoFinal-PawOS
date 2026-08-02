@@ -1,0 +1,11 @@
+[Unit]
+Description=PawOS - Servidor de Monitoreo (CPU, memoria, procesos via HTTP)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pawos-monitoreo
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
