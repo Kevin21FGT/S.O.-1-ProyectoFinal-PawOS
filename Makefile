@@ -41,3 +41,22 @@ clean:
 	rm -f $(OBJ) $(ASM_OBJ) $(DEMONIO_OBJ) $(MONITOR_OBJ) $(BIN) $(DEMONIO_BIN) $(MONITOR_BIN)
 
 .PHONY: all clean
+# =====================================================================
+# Agregar este bloque al FINAL del Makefile que ya tienes
+# (no reemplaza nada de lo que ya existe: "make all" y "make clean"
+#  del programa CLI siguen funcionando exactamente igual que antes)
+# =====================================================================
+
+# ---- Interfaz grafica (GTK3) ----
+GTK_CFLAGS = $(shell pkg-config --cflags gtk+-3.0)
+GTK_LIBS   = $(shell pkg-config --libs gtk+-3.0)
+
+GUI_BIN = pawos-refugio-gui
+
+gui: src/main_gtk.c src/db.c src/auth.c src/procesos.c src/memoria.c
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db.c src/auth.c src/procesos.c src/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm
+
+clean-gui:
+	rm -f $(GUI_BIN)
+
+.PHONY: gui clean-gui
