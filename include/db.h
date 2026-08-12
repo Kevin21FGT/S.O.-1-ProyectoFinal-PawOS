@@ -53,6 +53,9 @@ typedef struct {
 int  db_init(const char *ruta);
 void db_close(void);
 
+/* ---------- Autenticacion (tabla usuarios) ---------- */
+int  usuario_autenticar(const char *username, const char *password, int *rol_out);
+
 /* ---------- Mascotas ---------- */
 int  mascota_agregar(const Mascota *m);
 int  mascota_listar(Mascota **out, int *n);
@@ -62,6 +65,9 @@ int  mascota_buscar_por_id(int id, Mascota *out);
 
 /* ---------- Vacunas ---------- */
 int  vacuna_agregar(const Vacuna *v);
+int  vacuna_buscar_por_id(int id, Vacuna *out);
+int  vacuna_actualizar(const Vacuna *v);
+int  vacuna_eliminar(int id);
 int  vacuna_listar(Vacuna **out, int *n);
 int  vacuna_pendientes(Vacuna **out, int *n); /* fecha_proxima <= hoy */
 

@@ -1,9 +1,15 @@
-
 /*
  * servidor_monitoreo.c - Servidor de monitoreo de PawOS.
  * Expone un dashboard HTML por HTTP con CPU, memoria, swap, disco,
  * tiempo activo y procesos, leyendo directo de /proc. Protegido con
  * autenticacion basica HTTP (usuario/contrasena).
+ *
+ * Ademas expone POST /api/alerta: el endpoint que usa el modulo de
+ * sensores del ESP32 (ver pawos_sensor_animal.ino) para reportar
+ * posibles senales de lesion, fiebre o maltrato. Ese endpoint NO pide
+ * autenticacion (el ESP32 no la envia) y guarda cada alerta en la
+ * tabla alertas_sensores via alerta_registrar(), la misma que usa el
+ * modulo "Alertas de Sensores" de la GUI y del CLI.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,10 +20,17 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/statvfs.h>
-
+#include "db.h"
 #define PUERTO 8080
 #define USUARIO "admin"
 #define CONTRASENA "pawos2026"
+#define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
+#define TAM_BUF_PETICION 4096
+
+/* Se pone en 1 solo si db_init() funciono; si la BD no esta disponible
+ * el dashboard sigue funcionando igual, pero /api/alerta responde con
+ * error en vez de intentar escribir. */
+static int db_disponible = 0;
 
 static double leer_uptime(void) {
     FILE *f = fopen("/proc/uptime", "r");
@@ -36,7 +49,6 @@ static void leer_memoria(long *total_kb, long *disponible_kb) {
     }
     fclose(f);
 }
-
 static void leer_swap(long *total_kb, long *usado_kb) {
     FILE *f = fopen("/proc/meminfo", "r");
     long swap_total = 0, swap_free = 0;
@@ -56,12 +68,10 @@ static void leer_carga(double *l1, double *l5, double *l15) {
     *l1 = *l5 = *l15 = 0;
     if (f) { if (fscanf(f, "%lf %lf %lf", l1, l5, l15) != 3) { *l1=*l5=*l15=0; } fclose(f); }
 }
-
 static int contar_cpus(void) {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     return (n > 0) ? (int)n : 1;
 }
-
 static void leer_disco(double *usado_gb, double *total_gb) {
     struct statvfs st;
     *usado_gb = 0; *total_gb = 0;
@@ -87,7 +97,6 @@ static int contar_procesos(void) {
     closedir(d);
     return contador;
 }
-
 static const char *color_por_pct(double pct) {
     if (pct < 60) return "#2ecc71";
     if (pct < 85) return "#f1c40f";
@@ -139,7 +148,6 @@ static void generar_pagina(char *buf, size_t bufsize) {
     int cpus = contar_cpus();
     double disco_usado, disco_total;
     leer_disco(&disco_usado, &disco_total);
-
     long mem_usada = mem_total - mem_disp;
     double mem_pct = mem_total > 0 ? (100.0 * mem_usada / mem_total) : 0;
     double swap_pct = swap_total > 0 ? (100.0 * swap_usado / swap_total) : 0;
@@ -166,23 +174,18 @@ static void generar_pagina(char *buf, size_t bufsize) {
         "<div class='grid'>"
         "<div class='card'><h2>Tiempo Activo</h2>"
         "<div class='valor'>%dh %dm</div></div>"
-
         "<div class='card'><h2>CPU (%d nucleos)</h2>"
         "<div class='valor'>%.2f (carga 1 min)</div>"
         "<div class='barra-fondo'><div class='barra' style='width:%.1f%%;background:%s;'></div></div></div>"
-
         "<div class='card'><h2>Memoria RAM</h2>"
         "<div class='valor'>%ld / %ld MB (%.1f%%)</div>"
         "<div class='barra-fondo'><div class='barra' style='width:%.1f%%;background:%s;'></div></div></div>"
-
         "<div class='card'><h2>Memoria Swap</h2>"
         "<div class='valor'>%ld / %ld MB (%.1f%%)</div>"
         "<div class='barra-fondo'><div class='barra' style='width:%.1f%%;background:%s;'></div></div></div>"
-
         "<div class='card'><h2>Disco (/)</h2>"
         "<div class='valor'>%.1f / %.1f GB (%.1f%%)</div>"
         "<div class='barra-fondo'><div class='barra' style='width:%.1f%%;background:%s;'></div></div></div>"
-
         "<div class='card'><h2>Procesos Activos</h2>"
         "<div class='valor'>%d</div></div>"
         "</div></body></html>",
@@ -193,39 +196,190 @@ static void generar_pagina(char *buf, size_t bufsize) {
         disco_usado, disco_total, disco_pct, disco_pct, color_por_pct(disco_pct),
         procesos);
 }
+
+/* =================================================================
+ * POST /api/alerta - puente para las alertas del ESP32
+ * ================================================================= */
+
+/* Busca "clave":"valor de texto" en un JSON plano (sin objetos
+ * anidados) y copia el valor a out. Formato fijo, generado siempre
+ * por nuestro propio firmware, asi que no hace falta un parser
+ * completo de JSON. */
+static int extraer_campo_texto_json(const char *json, const char *clave, char *out, size_t out_size) {
+    char patron[64];
+    snprintf(patron, sizeof(patron), "\"%s\"", clave);
+    const char *p = strstr(json, patron);
+    out[0] = '\0';
+    if (!p) return 0;
+    p += strlen(patron);
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != ':') return 0;
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != '"') return 0;
+    p++;
+    size_t i = 0;
+    while (*p && *p != '"' && i < out_size - 1) {
+        out[i++] = *p++;
+    }
+    out[i] = '\0';
+    return 1;
+}
+
+/* Igual que arriba pero para un campo numerico sin comillas (ej. "valor":39.8). */
+static int extraer_campo_numero_json(const char *json, const char *clave, double *out) {
+    char patron[64];
+    snprintf(patron, sizeof(patron), "\"%s\"", clave);
+    const char *p = strstr(json, patron);
+    if (!p) return 0;
+    p += strlen(patron);
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != ':') return 0;
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+    char *fin = NULL;
+    double v = strtod(p, &fin);
+    if (fin == p) return 0;
+    *out = v;
+    return 1;
+}
+
+static long extraer_content_length(const char *peticion) {
+    const char *p = strstr(peticion, "Content-Length:");
+    if (!p) p = strstr(peticion, "content-length:");
+    if (!p) return -1;
+    p = strchr(p, ':');
+    if (!p) return -1;
+    p++;
+    while (*p == ' ') p++;
+    return atol(p);
+}
+
+static char *buscar_cuerpo(char *peticion) {
+    char *p = strstr(peticion, "\r\n\r\n");
+    return p ? p + 4 : NULL;
+}
+
+/* Recibe la peticion POST /api/alerta, la parsea y guarda la alerta.
+ * peticion/recibidos: lo que ya se leyo del socket en el buffer
+ * principal (puede incluir parte o todo el cuerpo JSON). Si hace
+ * falta, sigue leyendo del socket hasta completar Content-Length. */
+static void manejar_alerta_esp32(int cliente_fd, char *peticion, ssize_t recibidos) {
+    long content_length = extraer_content_length(peticion);
+    char *cuerpo = buscar_cuerpo(peticion);
+    char respuesta[512];
+
+    if (cuerpo && content_length > 0) {
+        ssize_t ya_en_cuerpo = recibidos - (cuerpo - peticion);
+        while (ya_en_cuerpo < content_length && recibidos < (ssize_t)(TAM_BUF_PETICION - 1)) {
+            ssize_t extra = read(cliente_fd, peticion + recibidos, TAM_BUF_PETICION - 1 - recibidos);
+            if (extra <= 0) break;
+            recibidos += extra;
+            peticion[recibidos] = '\0';
+            ya_en_cuerpo += extra;
+            cuerpo = buscar_cuerpo(peticion);
+        }
+    }
+
+    if (!cuerpo) {
+        int len = snprintf(respuesta, sizeof(respuesta),
+            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        write(cliente_fd, respuesta, len);
+        fprintf(stderr, "[pawos-monitoreo] POST /api/alerta sin cuerpo, se descarto.\n");
+        return;
+    }
+
+    Alerta a;
+    memset(&a, 0, sizeof(a));
+    char animal_id[sizeof(a.animal_id)] = {0};
+    char tipo[sizeof(a.tipo)] = {0};
+    char detalle[sizeof(a.detalle)] = {0};
+    double valor = 0;
+
+    extraer_campo_texto_json(cuerpo, "animal_id", animal_id, sizeof(animal_id));
+    extraer_campo_texto_json(cuerpo, "tipo", tipo, sizeof(tipo));
+    extraer_campo_texto_json(cuerpo, "detalle", detalle, sizeof(detalle));
+    extraer_campo_numero_json(cuerpo, "valor", &valor);
+
+    if (!db_disponible || strlen(animal_id) == 0 || strlen(tipo) == 0) {
+        int len = snprintf(respuesta, sizeof(respuesta),
+            "HTTP/1.1 422 Unprocessable Entity\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        write(cliente_fd, respuesta, len);
+        fprintf(stderr, "[pawos-monitoreo] Alerta ESP32 invalida o BD no disponible, se descarto.\n");
+        return;
+    }
+
+    snprintf(a.animal_id, sizeof(a.animal_id), "%s", animal_id);
+    snprintf(a.tipo, sizeof(a.tipo), "%s", tipo);
+    snprintf(a.detalle, sizeof(a.detalle), "%s", detalle);
+    a.valor = valor;
+
+    if (alerta_registrar(&a) == 0) {
+        printf("[pawos-monitoreo] Alerta ESP32 guardada: animal=%s tipo=%s valor=%.2f\n",
+               animal_id, tipo, valor);
+        const char *cuerpo_resp = "{\"estado\":\"ok\"}";
+        int len = snprintf(respuesta, sizeof(respuesta),
+            "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(cuerpo_resp), cuerpo_resp);
+        write(cliente_fd, respuesta, len);
+    } else {
+        fprintf(stderr, "[pawos-monitoreo] Error al guardar la alerta ESP32 en la base de datos.\n");
+        int len = snprintf(respuesta, sizeof(respuesta),
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        write(cliente_fd, respuesta, len);
+    }
+}
+
 int main(void) {
+    if (db_init(RUTA_BD_DEFECTO) == 0) {
+        db_disponible = 1;
+    } else {
+        fprintf(stderr, "[pawos-monitoreo] Aviso: no se pudo usar %s, probando ./pawos.db\n", RUTA_BD_DEFECTO);
+        if (db_init("pawos.db") == 0) {
+            db_disponible = 1;
+        } else {
+            fprintf(stderr, "[pawos-monitoreo] No se pudo inicializar la base de datos: "
+                            "las alertas del ESP32 no se podran guardar (el dashboard si sigue funcionando).\n");
+        }
+    }
+
     int servidor_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (servidor_fd < 0) { perror("socket"); return 1; }
-
     int opt = 1;
     setsockopt(servidor_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
     struct sockaddr_in direccion;
     memset(&direccion, 0, sizeof(direccion));
     direccion.sin_family = AF_INET;
     direccion.sin_addr.s_addr = INADDR_ANY;
     direccion.sin_port = htons(PUERTO);
-
     if (bind(servidor_fd, (struct sockaddr *)&direccion, sizeof(direccion)) < 0) {
         perror("bind"); return 1;
     }
     if (listen(servidor_fd, 10) < 0) {
         perror("listen"); return 1;
     }
-
-    printf("[pawos-monitoreo] Escuchando en el puerto %d (con autenticacion)...\n", PUERTO);
+    printf("[pawos-monitoreo] Escuchando en el puerto %d (dashboard con auth + POST /api/alerta para el ESP32)...\n", PUERTO);
     fflush(stdout);
     char pagina[8192];
     char respuesta[8600];
-
     while (1) {
         int cliente_fd = accept(servidor_fd, NULL, NULL);
         if (cliente_fd < 0) continue;
 
-        char buf_peticion[2048];
+        static char buf_peticion[TAM_BUF_PETICION];
         ssize_t leidos = read(cliente_fd, buf_peticion, sizeof(buf_peticion) - 1);
         if (leidos > 0) buf_peticion[leidos] = '\0';
-        else buf_peticion[0] = '\0';
+        else { buf_peticion[0] = '\0'; leidos = 0; }
+
+        char metodo[8] = {0};
+        char ruta[256] = {0};
+        sscanf(buf_peticion, "%7s %255s", metodo, ruta);
+
+        if (strcmp(metodo, "POST") == 0 && strcmp(ruta, "/api/alerta") == 0) {
+            manejar_alerta_esp32(cliente_fd, buf_peticion, leidos);
+            close(cliente_fd);
+            continue;
+        }
 
         if (!autorizado(buf_peticion)) {
             const char *cuerpo = "<html><body><h1>401 - Acceso no autorizado</h1>"
@@ -240,16 +394,14 @@ int main(void) {
             close(cliente_fd);
             continue;
         }
-
         generar_pagina(pagina, sizeof(pagina));
         int len = snprintf(respuesta, sizeof(respuesta),
             "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(pagina), pagina);
-
         write(cliente_fd, respuesta, len);
         close(cliente_fd);
     }
-
+    if (db_disponible) db_close();
     close(servidor_fd);
     return 0;
 }

@@ -47,6 +47,12 @@ static const char *SCHEMA =
     "  monto REAL NOT NULL,"
     "  fecha TEXT NOT NULL"
     ");"
+    "CREATE TABLE IF NOT EXISTS usuarios ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  username TEXT NOT NULL UNIQUE,"
+    "  password TEXT NOT NULL,"
+    "  rol INTEGER NOT NULL"
+    ");"
     "CREATE TABLE IF NOT EXISTS alertas_sensores ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "  animal_id TEXT NOT NULL,"
@@ -69,12 +75,33 @@ int db_init(const char *ruta) {
         return -1;
     }
     sqlite3_exec(g_db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL);
+    sqlite3_exec(g_db,
+        "INSERT OR IGNORE INTO usuarios (username, password, rol) VALUES "
+        "('admin_refugio','admin123',0),"
+        "('veterinario1','vet123',1),"
+        "('voluntario1','vol123',2);",
+        NULL, NULL, NULL);
     return 0;
 }
 
 void db_close(void) {
     if (g_db) sqlite3_close(g_db);
     g_db = NULL;
+}
+
+int usuario_autenticar(const char *username, const char *password, int *rol_out) {
+    const char *sql = "SELECT rol FROM usuarios WHERE username=? AND password=?;";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_text(st, 1, username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, password, -1, SQLITE_STATIC);
+    int ok = -1;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        if (rol_out) *rol_out = sqlite3_column_int(st, 0);
+        ok = 0;
+    }
+    sqlite3_finalize(st);
+    return ok;
 }
 
 /* ---------------- Mascotas ---------------- */
@@ -177,6 +204,49 @@ int vacuna_agregar(const Vacuna *v) {
     sqlite3_bind_text(st, 2, v->nombre_vacuna, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 3, v->fecha_aplicacion, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 4, v->fecha_proxima, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int vacuna_buscar_por_id(int id, Vacuna *out) {
+    const char *sql = "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima FROM vacunas WHERE id=?;";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_int(st, 1, id);
+    int found = -1;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        memset(out, 0, sizeof(*out));
+        out->id = sqlite3_column_int(st, 0);
+        out->mascota_id = sqlite3_column_int(st, 1);
+        snprintf(out->nombre_vacuna, sizeof(out->nombre_vacuna), "%s", (const char*)sqlite3_column_text(st, 2));
+        snprintf(out->fecha_aplicacion, sizeof(out->fecha_aplicacion), "%s", (const char*)sqlite3_column_text(st, 3));
+        const unsigned char *fp = sqlite3_column_text(st, 4);
+        snprintf(out->fecha_proxima, sizeof(out->fecha_proxima), "%s", fp ? (const char*)fp : "");
+        found = 0;
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+
+int vacuna_actualizar(const Vacuna *v) {
+    const char *sql = "UPDATE vacunas SET nombre_vacuna=?, fecha_aplicacion=?, fecha_proxima=? WHERE id=?;";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_text(st, 1, v->nombre_vacuna, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, v->fecha_aplicacion, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 3, v->fecha_proxima, -1, SQLITE_STATIC);
+    sqlite3_bind_int(st, 4, v->id);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int vacuna_eliminar(int id) {
+    const char *sql = "DELETE FROM vacunas WHERE id=?;";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_int(st, 1, id);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? 0 : -1;
