@@ -68,17 +68,18 @@ BACKUPEOF
 chmod 755 /usr/local/bin/pawos-backup-nube
 
 echo "=== 5. Creando grupos y usuarios de PawOS ==="
-for g in pawos-admin pawos-veterinario pawos-voluntario; do
+for g in pawos-admin pawos-veterinario pawos-voluntario pawos-refugio; do
     getent group "$g" >/dev/null || groupadd "$g"
 done
 crear_usuario() {
     local user=$1 grupo=$2 pass=$3
     if ! id "$user" &>/dev/null; then
-        useradd -m -G "$grupo" -s /bin/bash "$user"
+        useradd -m -G "$grupo,pawos-refugio" -s /bin/bash "$user"
         echo "${user}:${pass}" | chpasswd
         echo "Usuario creado: $user"
     else
         echo "Usuario ya existe, se omite: $user"
+        usermod -aG pawos-refugio "$user"
     fi
 }
 crear_usuario admin_refugio  pawos-admin       admin123
@@ -87,7 +88,7 @@ crear_usuario voluntario1    pawos-voluntario  vol123
 
 echo "=== 6. Creando /var/pawos y permisos ==="
 mkdir -p /var/pawos/reportes
-chown -R root:pawos-admin /var/pawos
+chown -R root:pawos-refugio /var/pawos
 chmod -R 2770 /var/pawos
 
 echo "=== 7. Configurando sudoers (solo apagar/reiniciar) ==="

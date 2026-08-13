@@ -17,7 +17,7 @@ DEMONIO_SRC = src/vacunas_demonio.c src/db.c
 DEMONIO_OBJ = $(DEMONIO_SRC:.c=.o)
 DEMONIO_BIN = pawos-vacunas-check
 
-MONITOR_SRC = src/servidor_monitoreo.c
+MONITOR_SRC = src/servidor_monitoreo.c src/db.c
 MONITOR_OBJ = $(MONITOR_SRC:.c=.o)
 MONITOR_BIN = pawos-monitoreo
 
@@ -29,7 +29,7 @@ $(DEMONIO_BIN): $(DEMONIO_OBJ)
 	$(CC) $(DEMONIO_OBJ) -o $(DEMONIO_BIN) -lsqlite3 -lm
 
 $(MONITOR_BIN): $(MONITOR_OBJ)
-	$(CC) $(MONITOR_OBJ) -o $(MONITOR_BIN)
+	$(CC) $(MONITOR_OBJ) -o $(MONITOR_BIN) -lsqlite3 -lm
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -41,3 +41,22 @@ clean:
 	rm -f $(OBJ) $(ASM_OBJ) $(DEMONIO_OBJ) $(MONITOR_OBJ) $(BIN) $(DEMONIO_BIN) $(MONITOR_BIN)
 
 .PHONY: all clean
+# =====================================================================
+# Agregar este bloque al FINAL del Makefile que ya tienes
+# (no reemplaza nada de lo que ya existe: "make all" y "make clean"
+#  del programa CLI siguen funcionando exactamente igual que antes)
+# =====================================================================
+
+# ---- Interfaz grafica (GTK3) ----
+GTK_CFLAGS = $(shell pkg-config --cflags gtk+-3.0)
+GTK_LIBS   = $(shell pkg-config --libs gtk+-3.0)
+
+GUI_BIN = pawos-refugio-gui
+
+gui: src/main_gtk.c src/db.c src/auth.c src/procesos.c src/memoria.c
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db.c src/auth.c src/procesos.c src/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm
+
+clean-gui:
+	rm -f $(GUI_BIN)
+
+.PHONY: gui clean-gui
