@@ -21,6 +21,7 @@ typedef struct {
     char nombre_vacuna[64];
     char fecha_aplicacion[16];
     char fecha_proxima[16];
+    char observaciones[128]; /* notas libres sobre esta vacuna, opcional */
 } Vacuna;
 
 typedef struct {
@@ -48,6 +49,14 @@ typedef struct {
     char   fecha_hora[24];  /* YYYY-MM-DD HH:MM:SS, la genera el programa al insertar */
     int    atendida;        /* 0 = pendiente, 1 = ya revisada por el personal */
 } Alerta;
+
+typedef struct {
+    int  id;
+    int  mascota_id;
+    char nota[256];
+    char autor[64];    /* usuario que dejo la nota */
+    char fecha[24];    /* YYYY-MM-DD HH:MM:SS, la genera el programa al insertar */
+} NotaVeterinario;
 
 /* ---------- Ciclo de vida ---------- */
 int  db_init(const char *ruta);
@@ -85,6 +94,10 @@ int  alerta_registrar(const Alerta *a);       /* genera fecha_hora automaticamen
 int  alerta_listar(Alerta **out, int *n);     /* todas, mas recientes primero */
 int  alerta_pendientes(Alerta **out, int *n); /* atendida = 0, mas recientes primero */
 int  alerta_marcar_atendida(int id);
+
+/* ---------- Notas del veterinario ---------- */
+int  nota_veterinario_agregar(const NotaVeterinario *n); /* genera fecha automaticamente */
+int  nota_veterinario_listar(NotaVeterinario **out, int *n); /* todas, mas recientes primero */
 
 /* ---------- Reportes ---------- */
 int reporte_generar(const char *ruta_salida);

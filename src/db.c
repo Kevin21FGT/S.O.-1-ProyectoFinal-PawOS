@@ -30,6 +30,7 @@ static const char *SCHEMA =
     "  nombre_vacuna TEXT NOT NULL,"
     "  fecha_aplicacion TEXT NOT NULL,"
     "  fecha_proxima TEXT,"
+    "  observaciones TEXT DEFAULT '',"
     "  FOREIGN KEY(mascota_id) REFERENCES mascotas(id)"
     ");"
     "CREATE TABLE IF NOT EXISTS adopciones ("
@@ -52,6 +53,13 @@ static const char *SCHEMA =
     "  username TEXT NOT NULL UNIQUE,"
     "  password TEXT NOT NULL,"
     "  rol INTEGER NOT NULL"
+    ");"
+    "CREATE TABLE IF NOT EXISTS notas_veterinario ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  mascota_id INTEGER NOT NULL,"
+    "  nota TEXT NOT NULL,"
+    "  autor TEXT NOT NULL,"
+    "  fecha TEXT NOT NULL"
     ");"
     "CREATE TABLE IF NOT EXISTS alertas_sensores ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -81,6 +89,13 @@ int db_init(const char *ruta) {
         "('veterinario1','vet123',1),"
         "('voluntario1','vol123',2);",
         NULL, NULL, NULL);
+    /* Migracion aditiva: si la base de datos ya existia de una version
+     * anterior de PawOS (tabla vacunas sin la columna observaciones), la
+     * agrega ahora. Si la columna ya existe (bases nuevas, creadas ya con
+     * el SCHEMA de arriba), sqlite devuelve error "duplicate column name",
+     * que se ignora a proposito: no rompe nada, solo significa que ya
+     * estaba aplicada. */
+    sqlite3_exec(g_db, "ALTER TABLE vacunas ADD COLUMN observaciones TEXT DEFAULT '';", NULL, NULL, NULL);
     return 0;
 }
 
@@ -196,21 +211,22 @@ int mascota_buscar_por_id(int id, Mascota *out) {
 
 int vacuna_agregar(const Vacuna *v) {
     const char *sql =
-        "INSERT INTO vacunas (mascota_id, nombre_vacuna, fecha_aplicacion, fecha_proxima) "
-        "VALUES (?,?,?,?);";
+        "INSERT INTO vacunas (mascota_id, nombre_vacuna, fecha_aplicacion, fecha_proxima, observaciones) "
+        "VALUES (?,?,?,?,?);";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_int(st, 1, v->mascota_id);
     sqlite3_bind_text(st, 2, v->nombre_vacuna, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 3, v->fecha_aplicacion, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 4, v->fecha_proxima, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 5, v->observaciones, -1, SQLITE_STATIC);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? 0 : -1;
 }
 
 int vacuna_buscar_por_id(int id, Vacuna *out) {
-    const char *sql = "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima FROM vacunas WHERE id=?;";
+    const char *sql = "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones FROM vacunas WHERE id=?;";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_int(st, 1, id);
@@ -223,6 +239,8 @@ int vacuna_buscar_por_id(int id, Vacuna *out) {
         snprintf(out->fecha_aplicacion, sizeof(out->fecha_aplicacion), "%s", (const char*)sqlite3_column_text(st, 3));
         const unsigned char *fp = sqlite3_column_text(st, 4);
         snprintf(out->fecha_proxima, sizeof(out->fecha_proxima), "%s", fp ? (const char*)fp : "");
+        const unsigned char *obs = sqlite3_column_text(st, 5);
+        snprintf(out->observaciones, sizeof(out->observaciones), "%s", obs ? (const char*)obs : "");
         found = 0;
     }
     sqlite3_finalize(st);
@@ -230,13 +248,14 @@ int vacuna_buscar_por_id(int id, Vacuna *out) {
 }
 
 int vacuna_actualizar(const Vacuna *v) {
-    const char *sql = "UPDATE vacunas SET nombre_vacuna=?, fecha_aplicacion=?, fecha_proxima=? WHERE id=?;";
+    const char *sql = "UPDATE vacunas SET nombre_vacuna=?, fecha_aplicacion=?, fecha_proxima=?, observaciones=? WHERE id=?;";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_text(st, 1, v->nombre_vacuna, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 2, v->fecha_aplicacion, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 3, v->fecha_proxima, -1, SQLITE_STATIC);
-    sqlite3_bind_int(st, 4, v->id);
+    sqlite3_bind_text(st, 4, v->observaciones, -1, SQLITE_STATIC);
+    sqlite3_bind_int(st, 5, v->id);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? 0 : -1;
@@ -267,6 +286,8 @@ static int vacuna_query(const char *sql, Vacuna **out, int *n) {
         snprintf(v->fecha_aplicacion, sizeof(v->fecha_aplicacion), "%s", (const char*)sqlite3_column_text(st, 3));
         const unsigned char *fp = sqlite3_column_text(st, 4);
         snprintf(v->fecha_proxima, sizeof(v->fecha_proxima), "%s", fp ? (const char*)fp : "");
+        const unsigned char *obs = sqlite3_column_text(st, 5);
+        snprintf(v->observaciones, sizeof(v->observaciones), "%s", obs ? (const char*)obs : "");
     }
     sqlite3_finalize(st);
     *out = arr;
@@ -276,7 +297,7 @@ static int vacuna_query(const char *sql, Vacuna **out, int *n) {
 
 int vacuna_listar(Vacuna **out, int *n) {
     return vacuna_query(
-        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima FROM vacunas ORDER BY fecha_proxima;",
+        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones FROM vacunas ORDER BY fecha_proxima;",
         out, n);
 }
 
@@ -287,7 +308,7 @@ int vacuna_pendientes(Vacuna **out, int *n) {
     char hoy[16];
     strftime(hoy, sizeof(hoy), "%Y-%m-%d", &tmv);
     snprintf(sql, sizeof(sql),
-        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima FROM vacunas "
+        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones FROM vacunas "
         "WHERE fecha_proxima IS NOT NULL AND fecha_proxima <= '%s' ORDER BY fecha_proxima;", hoy);
     return vacuna_query(sql, out, n);
 }
@@ -462,6 +483,45 @@ int alerta_marcar_atendida(int id) {
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? 0 : -1;
+}
+
+/* ---------------- Notas del veterinario ---------------- */
+
+int nota_veterinario_agregar(const NotaVeterinario *n) {
+    const char *sql =
+        "INSERT INTO notas_veterinario (mascota_id, nota, autor, fecha) "
+        "VALUES (?,?,?, datetime('now','localtime'));";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_int(st, 1, n->mascota_id);
+    sqlite3_bind_text(st, 2, n->nota, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 3, n->autor, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int nota_veterinario_listar(NotaVeterinario **out, int *n) {
+    const char *sql =
+        "SELECT id, mascota_id, nota, autor, fecha FROM notas_veterinario ORDER BY id DESC;";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    int cap = 16, cnt = 0;
+    NotaVeterinario *arr = malloc(sizeof(NotaVeterinario) * cap);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (cnt == cap) { cap *= 2; arr = realloc(arr, sizeof(NotaVeterinario) * cap); }
+        NotaVeterinario *x = &arr[cnt++];
+        memset(x, 0, sizeof(*x));
+        x->id = sqlite3_column_int(st, 0);
+        x->mascota_id = sqlite3_column_int(st, 1);
+        snprintf(x->nota, sizeof(x->nota), "%s", (const char*)sqlite3_column_text(st, 2));
+        snprintf(x->autor, sizeof(x->autor), "%s", (const char*)sqlite3_column_text(st, 3));
+        snprintf(x->fecha, sizeof(x->fecha), "%s", (const char*)sqlite3_column_text(st, 4));
+    }
+    sqlite3_finalize(st);
+    *out = arr;
+    *n = cnt;
+    return 0;
 }
 
 /* ---------------- Reportes ---------------- */

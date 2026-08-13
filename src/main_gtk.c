@@ -512,6 +512,7 @@ enum {
     COL_V_NOMBRE,
     COL_V_APLICACION,
     COL_V_PROXIMA,
+    COL_V_OBSERVACIONES,
     N_COL_VACUNAS
 };
 
@@ -543,6 +544,7 @@ static void cargar_vacunas(ContextoVacunas *ctx) {
             COL_V_NOMBRE, vs[i].nombre_vacuna,
             COL_V_APLICACION, vs[i].fecha_aplicacion,
             COL_V_PROXIMA, vs[i].fecha_proxima,
+            COL_V_OBSERVACIONES, vs[i].observaciones,
             -1);
     }
     free(vs);
@@ -589,8 +591,10 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     GtkWidget *e_nombre = gtk_entry_new();
     GtkWidget *e_aplic  = gtk_entry_new();
     GtkWidget *e_prox   = gtk_entry_new();
+    GtkWidget *e_obs    = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_aplic), "AAAA-MM-DD");
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_prox), "AAAA-MM-DD (opcional)");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_obs), "Opcional");
 
     gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nombre de la vacuna:"), 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), e_nombre, 1, 0, 1, 1);
@@ -598,6 +602,8 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_aplic, 1, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Proxima dosis:"), 0, 2, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), e_prox, 1, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Observaciones:"), 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_obs, 1, 3, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
     gtk_widget_show_all(dialogo);
@@ -609,6 +615,7 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
         snprintf(v.nombre_vacuna, sizeof(v.nombre_vacuna), "%s", gtk_entry_get_text(GTK_ENTRY(e_nombre)));
         snprintf(v.fecha_aplicacion, sizeof(v.fecha_aplicacion), "%s", gtk_entry_get_text(GTK_ENTRY(e_aplic)));
         snprintf(v.fecha_proxima, sizeof(v.fecha_proxima), "%s", gtk_entry_get_text(GTK_ENTRY(e_prox)));
+        snprintf(v.observaciones, sizeof(v.observaciones), "%s", gtk_entry_get_text(GTK_ENTRY(e_obs)));
 
         if (vacuna_agregar(&v) == 0) {
             cargar_vacunas(ctx);
@@ -640,11 +647,11 @@ static void abrir_pantalla_vacunas(GtkWidget *padre, Rol rol) {
     gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
 
     ctx->store = gtk_list_store_new(N_COL_VACUNAS,
-        G_TYPE_INT, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+        G_TYPE_INT, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
     ctx->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->store));
     g_object_unref(ctx->store);
 
-    const char *encabezados[N_COL_VACUNAS] = {"ID", "ID Mascota", "Vacuna", "Aplicada", "Proxima"};
+    const char *encabezados[N_COL_VACUNAS] = {"ID", "ID Mascota", "Vacuna", "Aplicada", "Proxima", "Observaciones"};
     for (int i = 0; i < N_COL_VACUNAS; i++) {
         GtkCellRenderer *render = gtk_cell_renderer_text_new();
         GtkTreeViewColumn *col = gtk_tree_view_column_new_with_attributes(
@@ -1905,12 +1912,179 @@ static void abrir_pantalla_alertas(GtkWidget *padre, Rol rol) {
 }
 
 /* =================================================================
+ * Modulo: Notas del Veterinario
+ *
+ * Comentarios libres sobre una mascota, aparte de las vacunas (ej.
+ * "revisar cojera en pata trasera"). Mismo patron que Vacunas: todos
+ * pueden ver, solo Admin/Veterinario pueden agregar.
+ * ================================================================= */
+
+enum {
+    COL_NV_ID = 0,
+    COL_NV_MASCOTA,
+    COL_NV_NOTA,
+    COL_NV_AUTOR,
+    COL_NV_FECHA,
+    N_COL_NOTAS_VET
+};
+
+typedef struct {
+    GtkWidget    *ventana;
+    GtkWidget    *treeview;
+    GtkListStore *store;
+    Rol           rol;
+    const char   *usuario;
+} ContextoNotasVet;
+
+static void cargar_notas_veterinario(ContextoNotasVet *ctx) {
+    gtk_list_store_clear(ctx->store);
+
+    NotaVeterinario *ns;
+    int n;
+    if (nota_veterinario_listar(&ns, &n) != 0) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo leer la lista de notas.", TRUE);
+        return;
+    }
+
+    for (int i = 0; i < n; i++) {
+        GtkTreeIter iter;
+        gtk_list_store_append(ctx->store, &iter);
+        gtk_list_store_set(ctx->store, &iter,
+            COL_NV_ID, ns[i].id,
+            COL_NV_MASCOTA, ns[i].mascota_id,
+            COL_NV_NOTA, ns[i].nota,
+            COL_NV_AUTOR, ns[i].autor,
+            COL_NV_FECHA, ns[i].fecha,
+            -1);
+    }
+    free(ns);
+}
+
+static void on_agregar_nota_vet_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    ContextoNotasVet *ctx = (ContextoNotasVet *)datos;
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Agregar nota del veterinario", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *cuadricula = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(cuadricula), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(cuadricula), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(cuadricula), 12);
+
+    GtkWidget *e_mascota_id = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_mascota_id), "ID de la mascota");
+
+    GtkWidget *e_nota = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_nota), "Revisar cojera en pata trasera");
+
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("ID Mascota:"), 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_mascota_id, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nota:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_nota, 1, 1, 1, 1);
+
+    gtk_container_add(GTK_CONTAINER(area), cuadricula);
+    gtk_widget_show_all(dialogo);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        NotaVeterinario n;
+        memset(&n, 0, sizeof(n));
+        n.mascota_id = atoi(gtk_entry_get_text(GTK_ENTRY(e_mascota_id)));
+        snprintf(n.nota, sizeof(n.nota), "%s", gtk_entry_get_text(GTK_ENTRY(e_nota)));
+        snprintf(n.autor, sizeof(n.autor), "%s", ctx->usuario);
+
+        if (n.mascota_id <= 0 || strlen(n.nota) == 0) {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "El ID de mascota y la nota son obligatorios.", TRUE);
+        } else if (nota_veterinario_agregar(&n) == 0) {
+            cargar_notas_veterinario(ctx);
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Nota agregada correctamente.", FALSE);
+        } else {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Error al guardar la nota.", TRUE);
+        }
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void abrir_pantalla_notas_veterinario(GtkWidget *padre, Rol rol, const char *usuario) {
+    ContextoNotasVet *ctx = g_malloc0(sizeof(ContextoNotasVet));
+    ctx->rol = rol;
+    ctx->usuario = usuario;
+
+    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Notas del Veterinario");
+    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 700, 460);
+    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
+    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
+
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+
+    GtkWidget *titulo = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Notas del Veterinario</span>");
+    gtk_widget_set_halign(titulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+    GtkWidget *subtitulo = gtk_label_new(
+        "Comentarios y observaciones sobre una mascota, aparte de las vacunas.");
+    gtk_widget_set_halign(subtitulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), subtitulo, FALSE, FALSE, 0);
+
+    ctx->store = gtk_list_store_new(N_COL_NOTAS_VET,
+        G_TYPE_INT, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+    ctx->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->store));
+    g_object_unref(ctx->store);
+
+    const char *encabezados[N_COL_NOTAS_VET] = {"ID", "ID Mascota", "Nota", "Autor", "Fecha"};
+    for (int i = 0; i < N_COL_NOTAS_VET; i++) {
+        GtkCellRenderer *render = gtk_cell_renderer_text_new();
+        GtkTreeViewColumn *col = gtk_tree_view_column_new_with_attributes(
+            encabezados[i], render, "text", i, NULL);
+        gtk_tree_view_column_set_resizable(col, TRUE);
+        gtk_tree_view_append_column(GTK_TREE_VIEW(ctx->treeview), col);
+    }
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_container_add(GTK_CONTAINER(scroll), ctx->treeview);
+    gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
+
+    GtkWidget *fila_botones = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_pack_start(GTK_BOX(caja), fila_botones, FALSE, FALSE, 0);
+
+    GtkWidget *btn_todas   = gtk_button_new_with_label("Ver todas");
+    GtkWidget *btn_agregar = gtk_button_new_with_label("Agregar nota");
+    GtkWidget *btn_cerrar  = gtk_button_new_with_label("Cerrar");
+
+    gtk_box_pack_start(GTK_BOX(fila_botones), btn_todas, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(fila_botones), btn_agregar, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(fila_botones), btn_cerrar, FALSE, FALSE, 0);
+
+    /* Ver notas: todos los roles. Agregar: solo Admin y Veterinario,
+     * igual que Vacunas. */
+    if (rol == ROL_VOLUNTARIO) {
+        gtk_widget_set_sensitive(btn_agregar, FALSE);
+        gtk_widget_set_tooltip_text(btn_agregar, "Requiere rol Admin o Veterinario.");
+    }
+
+    g_signal_connect_swapped(btn_todas, "clicked", G_CALLBACK(cargar_notas_veterinario), ctx);
+    g_signal_connect(btn_agregar, "clicked", G_CALLBACK(on_agregar_nota_vet_clicked), ctx);
+    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
+    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+
+    cargar_notas_veterinario(ctx);
+    gtk_widget_show_all(ctx->ventana);
+}
+
+/* =================================================================
  * Ventana principal
  * ================================================================= */
 
 typedef struct {
-    GtkWidget *ventana_principal;
-    Rol        rol;
+    GtkWidget  *ventana_principal;
+    Rol         rol;
+    const char *usuario;
 } DatosBotonModulo;
 
 static void on_mascotas_clicked(GtkButton *boton, gpointer datos) {
@@ -1999,6 +2173,16 @@ static void on_alertas_clicked(GtkButton *boton, gpointer datos) {
     abrir_pantalla_alertas(d->ventana_principal, d->rol);
 }
 
+/* Notas del Veterinario: la ventana se abre para cualquier rol (leer las
+ * notas es informacion util para todo el personal); "Agregar nota" queda
+ * deshabilitado para Voluntario dentro de la propia ventana, igual que
+ * en Vacunas. */
+static void on_notas_vet_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    abrir_pantalla_notas_veterinario(d->ventana_principal, d->rol, d->usuario);
+}
+
 static void construir_ventana_principal(Rol rol, const char *usuario) {
     GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ventana), "PawOS Refugio");
@@ -2057,6 +2241,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "Administracion de Memoria",
         "Respaldo en la Nube",
         "Alertas de Sensores",
+        "Notas del Veterinario",
     };
     /* Icono (emoji) por modulo, solo cosmetico -- no afecta la logica. */
     const char *iconos_modulos[] = {
@@ -2069,6 +2254,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "\xF0\x9F\xA7\xA0", /* brain */
         "\xE2\x98\x81",     /* cloud */
         "\xF0\x9F\x9A\xA8", /* siren */
+        "\xF0\x9F\x93\x8B", /* clipboard */
     };
     /* Categoria por modulo (solo cosmetica, define el color del boton):
      * refugio = atencion directa al animal, gestion = administrativo,
@@ -2076,6 +2262,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     const char *categorias_modulos[] = {
         "cat-refugio", "cat-refugio", "cat-refugio", "cat-gestion",
         "cat-gestion", "cat-sistema", "cat-sistema", "cat-gestion", "cat-refugio",
+        "cat-refugio",
     };
     GCallback manejadores[] = {
         G_CALLBACK(on_mascotas_clicked),
@@ -2087,12 +2274,14 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         G_CALLBACK(on_memoria_clicked),
         G_CALLBACK(on_respaldo_clicked),
         G_CALLBACK(on_alertas_clicked),
+        G_CALLBACK(on_notas_vet_clicked),
     };
-    const int total_modulos = 9;
+    const int total_modulos = 10;
 
     DatosBotonModulo *datos_botones = g_malloc(sizeof(DatosBotonModulo));
     datos_botones->ventana_principal = ventana;
     datos_botones->rol = rol;
+    datos_botones->usuario = usuario;
     g_signal_connect(ventana, "destroy", G_CALLBACK(liberar_contexto), datos_botones);
 
     for (int i = 0; i < total_modulos; i++) {
