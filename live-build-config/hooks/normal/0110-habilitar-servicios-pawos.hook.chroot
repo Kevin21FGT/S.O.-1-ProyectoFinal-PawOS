@@ -1,3 +1,5 @@
 #!/bin/bash
 set -e
 systemctl enable pawos-vacunas.timer
+systemctl enable pawos-backup.timer
+systemctl enable pawos-monitoreo.service

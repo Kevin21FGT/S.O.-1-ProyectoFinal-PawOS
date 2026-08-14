@@ -22,6 +22,12 @@ static int pedir_entero(int fila, int col, const char *etiqueta) {
     return atoi(buffer);
 }
 
+static int comparar_pid_desc(const void *a, const void *b) {
+    const ProcesoInfo *pa = (const ProcesoInfo *)a;
+    const ProcesoInfo *pb = (const ProcesoInfo *)b;
+    return pb->pid - pa->pid;
+}
+
 static void ver_procesos_activos(void) {
     ProcesoInfo lista[PROCESOS_MAX];
     int total = procesos_obtener_lista(lista, PROCESOS_MAX);
@@ -34,6 +40,8 @@ static void ver_procesos_activos(void) {
         pausar();
         return;
     }
+
+    qsort(lista, total, sizeof(ProcesoInfo), comparar_pid_desc);
 
     mvprintw(3, 2, "%-8s %-24s %-14s", "PID", "NOMBRE", "ESTADO");
     mvprintw(4, 2, "--------------------------------------------------");

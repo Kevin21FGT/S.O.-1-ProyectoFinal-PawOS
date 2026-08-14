@@ -8,3 +8,5 @@ xterm
 libncurses6
 libsqlite3-0
 pcmanfm
+ufw
+rclone
