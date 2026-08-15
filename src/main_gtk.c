@@ -1517,8 +1517,21 @@ typedef struct {
     GtkWidget *ventana;
     GtkWidget *lbl_ultimo;
     GtkWidget *lbl_estado;
+    GtkWidget *lbl_modo;
+    GtkWidget *radio_auto;
+    GtkWidget *radio_manual;
+    GtkWidget *combo_intervalo;
     Rol        rol;
 } ContextoRespaldo;
+
+/* Los valores del combo de intervalo, en horas: 1 dia, 3 dias,
+ * 1 semana, 1 mes (aprox. 30 dias). El indice del combo coincide con
+ * el indice de este arreglo. */
+static const int INTERVALOS_HORAS[] = { 24, 72, 168, 720 };
+static const char *INTERVALOS_ETIQUETA[] = {
+    "Cada 1 dia", "Cada 3 dias", "Cada 1 semana", "Cada 1 mes"
+};
+#define N_INTERVALOS 4
 
 /* Ejecuta 'comando', lee la primera linea de su salida en 'out' (sin
  * salto de linea) y la deja vacia si algo fallo. */
@@ -1558,6 +1571,77 @@ static void actualizar_estado_respaldo(ContextoRespaldo *ctx) {
     gtk_label_set_text(GTK_LABEL(ctx->lbl_estado), buf);
 }
 
+/* Lee /var/pawos/backup_modo.txt (lo escribe pawos-configurar-respaldo)
+ * y ajusta los radio buttons / combo para reflejar el modo actual. Si
+ * el archivo no existe todavia (instalacion recien hecha, nunca se ha
+ * cambiado el modo), se asume Automatico cada 1 dia (el valor por
+ * defecto que deja instalar-pawos.sh). */
+static void actualizar_ui_modo_respaldo(ContextoRespaldo *ctx) {
+    char linea[64];
+    leer_salida_comando("cat /var/pawos/backup_modo.txt 2>/dev/null", linea, sizeof(linea));
+
+    int es_manual = (strncmp(linea, "manual", 6) == 0);
+    int horas = 24;
+    if (!es_manual) {
+        const char *dos_puntos = strchr(linea, ':');
+        if (dos_puntos && *(dos_puntos + 1)) horas = atoi(dos_puntos + 1);
+    }
+
+    int indice = 0;
+    for (int i = 0; i < N_INTERVALOS; i++) {
+        if (INTERVALOS_HORAS[i] == horas) { indice = i; break; }
+    }
+
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(es_manual ? ctx->radio_manual : ctx->radio_auto), TRUE);
+    gtk_combo_box_set_active(GTK_COMBO_BOX(ctx->combo_intervalo), indice);
+    gtk_widget_set_sensitive(ctx->combo_intervalo, !es_manual);
+
+    char buf[96];
+    snprintf(buf, sizeof(buf), "Modo actual: %s",
+             es_manual ? "Manual" : INTERVALOS_ETIQUETA[indice]);
+    gtk_label_set_text(GTK_LABEL(ctx->lbl_modo), buf);
+}
+
+static void on_radio_modo_respaldo_toggled(GtkToggleButton *boton, gpointer datos) {
+    (void)boton;
+    ContextoRespaldo *ctx = (ContextoRespaldo *)datos;
+    gboolean automatico = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ctx->radio_auto));
+    gtk_widget_set_sensitive(ctx->combo_intervalo, automatico);
+}
+
+static void on_guardar_config_respaldo_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    ContextoRespaldo *ctx = (ContextoRespaldo *)datos;
+
+    if (ctx->rol != ROL_ADMIN) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Requiere rol Administrador.", TRUE);
+        return;
+    }
+
+    char comando[160];
+    if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ctx->radio_manual))) {
+        snprintf(comando, sizeof(comando), "sudo -n /usr/local/bin/pawos-configurar-respaldo manual");
+    } else {
+        int indice = gtk_combo_box_get_active(GTK_COMBO_BOX(ctx->combo_intervalo));
+        if (indice < 0) indice = 0;
+        snprintf(comando, sizeof(comando),
+                 "sudo -n /usr/local/bin/pawos-configurar-respaldo auto %d",
+                 INTERVALOS_HORAS[indice]);
+    }
+
+    int rc = system(comando);
+    if (rc == 0) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Configuracion de respaldo guardada.", FALSE);
+    } else {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana),
+            "No se pudo guardar la configuracion.\n"
+            "Verifica el permiso sudo (NOPASSWD) para\n"
+            "'pawos-configurar-respaldo' (ver README.md).", TRUE);
+    }
+    actualizar_ui_modo_respaldo(ctx);
+    actualizar_estado_respaldo(ctx);
+}
+
 static void on_actualizar_estado_respaldo_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     actualizar_estado_respaldo((ContextoRespaldo *)datos);
@@ -1574,17 +1658,26 @@ static void on_respaldar_ahora_clicked(GtkButton *boton, gpointer datos) {
 
     /* "sudo -n" para no quedarse esperando una contraseña que la GUI no
      * puede pedir; requiere la regla NOPASSWD de /etc/sudoers.d
-     * (ver README_gui.md, seccion de Respaldo en la Nube). */
-    int rc = system("sudo -n systemctl start pawos-backup.service");
+     * (ver README.md, seccion de Respaldo en la Nube).
+     *
+     * "--no-block": systemctl start, por defecto, ESPERA a que el
+     * servicio termine de correr (rclone incluido) antes de devolver
+     * el control - eso congelaba la ventana 20-30 segundos si rclone
+     * tardaba (por ejemplo, si "rclone config" no esta hecho todavia).
+     * Con --no-block, systemctl solo encola la tarea y regresa de
+     * inmediato; el resultado real se ve despues con
+     * "Actualizar estado". */
+    int rc = system("sudo -n systemctl --no-block start pawos-backup.service");
 
     if (rc == 0) {
         mostrar_mensaje(GTK_WINDOW(ctx->ventana),
-            "Respaldo iniciado correctamente.", FALSE);
+            "Respaldo iniciado. Puede tardar unos segundos en\n"
+            "completarse; dale a 'Actualizar estado' para ver el resultado.", FALSE);
     } else {
         mostrar_mensaje(GTK_WINDOW(ctx->ventana),
             "No se pudo iniciar el respaldo manualmente.\n"
             "Verifica el permiso sudo (NOPASSWD) para\n"
-            "'systemctl start pawos-backup.service' (ver README_gui.md).", TRUE);
+            "'systemctl start pawos-backup.service' (ver README.md).", TRUE);
     }
     actualizar_estado_respaldo(ctx);
 }
@@ -1595,7 +1688,7 @@ static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
 
     ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Respaldo en la Nube");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 560, 300);
+    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 560, 480);
     gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
     gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 16);
 
@@ -1629,6 +1722,37 @@ static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
     gtk_box_pack_start(GTK_BOX(caja_marco), ctx->lbl_estado, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(caja), marco, FALSE, FALSE, 0);
 
+    /* --- Configuracion: Automatico (con intervalo) o Manual --- */
+    GtkWidget *marco_config = gtk_frame_new("Configuracion del respaldo");
+    GtkWidget *caja_config = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_container_set_border_width(GTK_CONTAINER(caja_config), 10);
+    gtk_container_add(GTK_CONTAINER(marco_config), caja_config);
+
+    ctx->lbl_modo = gtk_label_new("Modo actual: -");
+    gtk_widget_set_halign(ctx->lbl_modo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja_config), ctx->lbl_modo, FALSE, FALSE, 0);
+
+    ctx->radio_auto = gtk_radio_button_new_with_label(NULL, "Automatico");
+    ctx->radio_manual = gtk_radio_button_new_with_label_from_widget(
+        GTK_RADIO_BUTTON(ctx->radio_auto), "Manual (solo con 'Respaldar ahora')");
+    gtk_box_pack_start(GTK_BOX(caja_config), ctx->radio_auto, FALSE, FALSE, 0);
+
+    ctx->combo_intervalo = gtk_combo_box_text_new();
+    for (int i = 0; i < N_INTERVALOS; i++) {
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ctx->combo_intervalo), INTERVALOS_ETIQUETA[i]);
+    }
+    gtk_combo_box_set_active(GTK_COMBO_BOX(ctx->combo_intervalo), 0);
+    gtk_widget_set_margin_start(ctx->combo_intervalo, 24);
+    gtk_box_pack_start(GTK_BOX(caja_config), ctx->combo_intervalo, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(caja_config), ctx->radio_manual, FALSE, FALSE, 0);
+
+    GtkWidget *btn_guardar_config = gtk_button_new_with_label("Guardar configuracion");
+    gtk_widget_set_halign(btn_guardar_config, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja_config), btn_guardar_config, FALSE, FALSE, 4);
+
+    gtk_box_pack_start(GTK_BOX(caja), marco_config, FALSE, FALSE, 0);
+
     GtkWidget *fila_botones = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_pack_start(GTK_BOX(caja), fila_botones, FALSE, FALSE, 0);
 
@@ -1645,14 +1769,22 @@ static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
     if (rol != ROL_ADMIN) {
         gtk_widget_set_sensitive(btn_respaldar, FALSE);
         gtk_widget_set_tooltip_text(btn_respaldar, "Requiere rol Administrador.");
+        gtk_widget_set_sensitive(ctx->radio_auto, FALSE);
+        gtk_widget_set_sensitive(ctx->radio_manual, FALSE);
+        gtk_widget_set_sensitive(ctx->combo_intervalo, FALSE);
+        gtk_widget_set_sensitive(btn_guardar_config, FALSE);
+        gtk_widget_set_tooltip_text(btn_guardar_config, "Requiere rol Administrador.");
     }
 
     g_signal_connect(btn_actualizar, "clicked", G_CALLBACK(on_actualizar_estado_respaldo_clicked), ctx);
     g_signal_connect(btn_respaldar, "clicked", G_CALLBACK(on_respaldar_ahora_clicked), ctx);
+    g_signal_connect(ctx->radio_auto, "toggled", G_CALLBACK(on_radio_modo_respaldo_toggled), ctx);
+    g_signal_connect(btn_guardar_config, "clicked", G_CALLBACK(on_guardar_config_respaldo_clicked), ctx);
     g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     actualizar_estado_respaldo(ctx);
+    actualizar_ui_modo_respaldo(ctx);
     gtk_widget_show_all(ctx->ventana);
 }
 
