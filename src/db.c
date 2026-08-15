@@ -5,11 +5,14 @@
  * alertas de sensores pasan por aqui. El resto del programa (menus
  * ncurses, o la interfaz grafica) no toca SQL directamente.
  */
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <crypt.h>
 #include "../include/db.h"
 
 static sqlite3 *g_db = NULL;
@@ -71,6 +74,29 @@ static const char *SCHEMA =
     "  atendida INTEGER NOT NULL DEFAULT 0"
     ");";
 
+/* Genera un hash de una contrasena en texto plano usando crypt() con
+ * SHA-512 (prefijo "$6$") y una sal aleatoria nueva cada vez. 'out'
+ * debe tener al menos 128 bytes. Se usa tanto para sembrar los
+ * usuarios por defecto como para migrar contrasenas viejas guardadas
+ * en texto plano (ver mas abajo) - nunca se guarda ni se compara la
+ * contrasena tal cual en la base de datos. */
+static void pawos_hash_password(const char *plano, char *out, size_t out_len) {
+    static int sembrado = 0;
+    if (!sembrado) {
+        srand((unsigned)time(NULL) ^ (unsigned)getpid());
+        sembrado = 1;
+    }
+    static const char alfabeto[] =
+        "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    char sal[20] = "$6$";
+    for (int i = 0; i < 16; i++) {
+        sal[3 + i] = alfabeto[rand() % (int)(sizeof(alfabeto) - 1)];
+    }
+    sal[19] = '\0';
+    char *resultado = crypt(plano, sal);
+    snprintf(out, out_len, "%s", resultado ? resultado : "");
+}
+
 int db_init(const char *ruta) {
     if (sqlite3_open(ruta, &g_db) != SQLITE_OK) {
         fprintf(stderr, "No se pudo abrir la base de datos: %s\n", sqlite3_errmsg(g_db));
@@ -83,12 +109,60 @@ int db_init(const char *ruta) {
         return -1;
     }
     sqlite3_exec(g_db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL);
-    sqlite3_exec(g_db,
-        "INSERT OR IGNORE INTO usuarios (username, password, rol) VALUES "
-        "('admin_refugio','admin123',0),"
-        "('veterinario1','vet123',1),"
-        "('voluntario1','vol123',2);",
-        NULL, NULL, NULL);
+
+    /* Semilla de usuarios por defecto: mismos usuarios y mismas
+     * contrasenas de siempre (admin123/vet123/vol123), pero ahora se
+     * guardan como hash (crypt(), SHA-512), nunca en texto plano.
+     * "INSERT OR IGNORE" sigue funcionando igual que antes: si el
+     * usuario ya existe (username es UNIQUE), no hace nada. */
+    {
+        struct { const char *user; const char *pass; int rol; } semilla[] = {
+            {"admin_refugio", "admin123", 0},
+            {"veterinario1",  "vet123",   1},
+            {"voluntario1",   "vol123",   2},
+        };
+        const char *sql_seed =
+            "INSERT OR IGNORE INTO usuarios (username, password, rol) VALUES (?,?,?);";
+        for (size_t i = 0; i < sizeof(semilla) / sizeof(semilla[0]); i++) {
+            char hash[128];
+            pawos_hash_password(semilla[i].pass, hash, sizeof(hash));
+            sqlite3_stmt *st;
+            if (sqlite3_prepare_v2(g_db, sql_seed, -1, &st, NULL) == SQLITE_OK) {
+                sqlite3_bind_text(st, 1, semilla[i].user, -1, SQLITE_STATIC);
+                sqlite3_bind_text(st, 2, hash, -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(st, 3, semilla[i].rol);
+                sqlite3_step(st);
+                sqlite3_finalize(st);
+            }
+        }
+    }
+
+    /* Migracion aditiva: si la base de datos ya existia de una version
+     * anterior de PawOS con contrasenas en texto plano (los hashes de
+     * crypt() siempre empiezan con "$"), las convierte a hash ahora
+     * mismo, sin pedirle nada al usuario ni perder ninguna cuenta. */
+    {
+        sqlite3_stmt *st;
+        if (sqlite3_prepare_v2(g_db, "SELECT id, password FROM usuarios;", -1, &st, NULL) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                int id = sqlite3_column_int(st, 0);
+                const unsigned char *pass_actual = sqlite3_column_text(st, 1);
+                if (pass_actual && pass_actual[0] != '\0' && pass_actual[0] != '$') {
+                    char hash[128];
+                    pawos_hash_password((const char *)pass_actual, hash, sizeof(hash));
+                    sqlite3_stmt *upd;
+                    if (sqlite3_prepare_v2(g_db, "UPDATE usuarios SET password=? WHERE id=?;", -1, &upd, NULL) == SQLITE_OK) {
+                        sqlite3_bind_text(upd, 1, hash, -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_int(upd, 2, id);
+                        sqlite3_step(upd);
+                        sqlite3_finalize(upd);
+                    }
+                }
+            }
+            sqlite3_finalize(st);
+        }
+    }
+
     /* Migracion aditiva: si la base de datos ya existia de una version
      * anterior de PawOS (tabla vacunas sin la columna observaciones), la
      * agrega ahora. Si la columna ya existe (bases nuevas, creadas ya con
@@ -105,15 +179,25 @@ void db_close(void) {
 }
 
 int usuario_autenticar(const char *username, const char *password, int *rol_out) {
-    const char *sql = "SELECT rol FROM usuarios WHERE username=? AND password=?;";
+    /* Ya no se compara la contrasena dentro del SQL (WHERE password=?):
+     * se trae el hash guardado para ese usuario y se compara aca,
+     * usando crypt() (que extrae la sal del propio hash guardado y
+     * recalcula, sin necesitar guardarla aparte). */
+    const char *sql = "SELECT rol, password FROM usuarios WHERE username=?;";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_text(st, 1, username, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 2, password, -1, SQLITE_STATIC);
     int ok = -1;
     if (sqlite3_step(st) == SQLITE_ROW) {
-        if (rol_out) *rol_out = sqlite3_column_int(st, 0);
-        ok = 0;
+        int rol = sqlite3_column_int(st, 0);
+        const unsigned char *hash_guardado = sqlite3_column_text(st, 1);
+        if (hash_guardado) {
+            char *resultado = crypt(password, (const char *)hash_guardado);
+            if (resultado && strcmp(resultado, (const char *)hash_guardado) == 0) {
+                if (rol_out) *rol_out = rol;
+                ok = 0;
+            }
+        }
     }
     sqlite3_finalize(st);
     return ok;

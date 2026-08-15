@@ -282,9 +282,21 @@ Como el código se copia una sola vez a `config/includes.chroot/opt/pawos/` en e
 
 ## Seguridad — estado actual
 
-Lo que **sí** está implementado: firewall configurado (ufw), permisos de sudo restringidos por usuario (solo apagar/reiniciar, excepto `admin_refugio` que también puede usar el instalador), y verificación de integridad de la base de donantes por checksum.
+Lo que está implementado: firewall configurado (ufw), permisos de sudo restringidos por usuario (solo apagar/reiniciar, excepto `admin_refugio` que también puede usar el instalador y el respaldo), verificación de integridad de la base de donantes por checksum, y **contraseñas hasheadas** (no en texto plano) tanto en el login del CLI como en el servidor de monitoreo.
 
-Lo que **falta** (pendiente, útil dejarlo anotado para la entrega): las contraseñas se guardan en **texto plano**, tanto en la tabla `usuarios` de la base de datos (login del CLI) como en el servidor de monitoreo (usuario/contraseña fijos en el código fuente: `admin` / `pawos2026`). Para una versión de producción real, lo correcto sería guardar un *hash* (por ejemplo con `bcrypt` o `crypt()`) en vez del texto plano.
+### Cómo funciona el hasheo de contraseñas
+
+Se usa `crypt()` de la librería estándar de C, con el algoritmo SHA-512 (los hashes que genera empiezan con el prefijo `$6$`). `crypt()` recibe la contraseña en texto plano más una "sal" (una cadena aleatoria) y devuelve un hash que incluye esa misma sal al principio, por eso no hace falta guardar la sal aparte: el hash guardado ya trae todo lo necesario para volver a verificarlo después.
+
+**Login del CLI (tabla `usuarios`, `db.c`):**
+
+- Al sembrar los tres usuarios por defecto (`admin_refugio`, `veterinario1`, `voluntario1`), `db_init()` genera una sal aleatoria nueva por usuario y guarda el hash resultante en la columna `password` — nunca la contraseña tal cual.
+- `usuario_autenticar()` ya no compara la contraseña dentro del `SELECT` (`WHERE password=?`); en vez de eso trae el hash guardado para ese usuario, y usa `crypt(contraseña_ingresada, hash_guardado)` — `crypt()` detecta la sal dentro del propio hash guardado, recalcula, y si el resultado coincide con el hash guardado, la contraseña es correcta.
+- **Migración automática:** si `db_init()` encuentra una base de datos de una instalación anterior con contraseñas todavía en texto plano (se detectan porque los hashes de `crypt()` siempre empiezan con `$` y el texto plano no), las convierte a hash en el momento, sin que el usuario tenga que hacer nada ni perder su cuenta — sigue iniciando sesión con la misma contraseña de siempre.
+
+**Servidor de monitoreo (`servidor_monitoreo.c`):** antes la contraseña (`admin` / `pawos2026`) estaba escrita tal cual en el código fuente, visible con solo abrir el archivo. Ahora el código solo tiene guardado el *hash* de esa contraseña (`CONTRASENA_HASH`); cuando llega una petición HTTP con autenticación básica, se decodifica el usuario/contraseña en base64, y la contraseña ingresada se verifica con `crypt()` contra ese hash — la contraseña real sigue siendo `admin` / `pawos2026` para quien ya la usaba, solo cambió cómo se verifica.
+
+Esto requiere la librería `libcrypt` (paquete `libcrypt-dev` para compilar, ya agregado a `instalar-pawos.sh` y a la lista de paquetes de la ISO) y enlazar con `-lcrypt` (ya agregado al `Makefile`, en los cuatro binarios que la necesitan: CLI, demonio de vacunas, servidor de monitoreo y GUI).
 
 ## Respaldo en la nube — estado actual
 
@@ -344,7 +356,7 @@ Si algún día se cambian los argumentos de cualquiera de esos dos comandos en e
 | Sistema de archivos organizado | Completo |
 | Scripts de automatización | Completo |
 | Servicios del sistema | Completo |
-| Seguridad básica | Parcial (falta hashear contraseñas) |
+| Seguridad básica | Completo (contraseñas hasheadas con `crypt()`/SHA-512, firewall, sudo restringido, checksum de integridad) |
 | Interfaz de usuario (CLI y gráfica) | Completo |
 | Servidor para monitorear | Completo |
 | Alojarlo en la nube | Completo (automático/manual desde el GUI, `rclone` configurado y funcionando) |
