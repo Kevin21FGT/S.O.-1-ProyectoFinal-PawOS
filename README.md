@@ -103,7 +103,7 @@ PawOS crea tres usuarios reales de Linux, cada uno en un grupo distinto:
 **Importante — dos mecanismos de permisos conviven en el código:**
 
 - El **GUI** (`main_gtk.c`) usa `auth.c`, que mira el grupo real de Linux del usuario que inició sesión (`auth_rol_actual()`). Esto es "gestión de usuarios y permisos" a nivel del sistema operativo de verdad.
-- El **CLI** (`main.c`) usa `pantalla_login.c`, que pide usuario/contraseña **dentro del programa** y los compara contra la tabla `usuarios` de la base de datos (`usuario_autenticar()` en `db.c`).
+- El **CLI** (`main.c`) usa `pantalla_login.c`, que pide usuario/contraseña **dentro del programa** y la verifica contra la tabla `usuarios` de la base de datos (`usuario_autenticar()` en `db.c`) — la contraseña se guarda como *hash* (`crypt()`, SHA-512), nunca en texto plano; ver [Seguridad — estado actual](#seguridad--estado-actual) para el detalle completo.
 
 Es decir, el CLI tiene su propio login independiente del sistema operativo. Funciona, pero es importante saberlo porque significa que hay dos "bases de verdad" distintas para los roles (los grupos de Linux, y la tabla `usuarios`) — quedan sincronizadas manualmente (mismos tres usuarios en ambos lados), no automáticamente.
 
@@ -115,7 +115,7 @@ SQLite, un solo archivo (`/var/pawos/pawos.db` en la ISO, o `./pawos.db` en prue
 - **vacunas** — asociada a una mascota, nombre de la vacuna, fecha de aplicación, próxima fecha, observaciones.
 - **adopciones** — asociada a una mascota, datos del adoptante, fecha (al registrarla, marca la mascota como `adoptado`).
 - **donantes** — nombre, contacto, monto donado, fecha.
-- **usuarios** — username, password, rol (usada solo por el login del CLI).
+- **usuarios** — username, password (guardada como *hash* SHA-512 vía `crypt()`, no en texto plano), rol (usada solo por el login del CLI).
 - **alertas_sensores** — alertas que manda un sensor ESP32 externo (ver más abajo).
 - **notas_veterinario** — notas clínicas libres por mascota.
 
@@ -144,7 +144,7 @@ Organiza todo lo que el refugio guarda en carpetas por categoría dentro de `/va
 
 ### Servidor de monitoreo (`servidor_monitoreo.c`)
 
-Un servidor HTTP propio (sin frameworks, sockets directos) que corre en el puerto **8080** y expone un dashboard HTML con CPU, memoria, swap, espacio en disco, tiempo activo y procesos — leído directo de `/proc`. Requiere autenticación básica HTTP.
+Un servidor HTTP propio (sin frameworks, sockets directos) que corre en el puerto **8080** y expone un dashboard HTML con CPU, memoria, swap, espacio en disco, tiempo activo y procesos — leído directo de `/proc`. Requiere autenticación básica HTTP; la contraseña se verifica contra un *hash* (`crypt()`, SHA-512) guardado en el código, no contra el texto plano — ver [Seguridad — estado actual](#seguridad--estado-actual).
 
 También expone `POST /api/alerta`, un endpoint sin autenticación pensado para que un sensor **ESP32** externo (por ejemplo, un collar con sensores de temperatura o movimiento) reporte posibles señales de lesión o maltrato; cada alerta que llega se guarda en la tabla `alertas_sensores` y aparece en el módulo "Alertas de Sensores" del CLI/GUI.
 
