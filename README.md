@@ -6,6 +6,7 @@ PawOS no es una distribución armada desde cero: es Debian 13 oficial, con un pr
 
 ## Índice
 
+- [De cero a un sistema operativo funcionando](#de-cero-a-un-sistema-operativo-funcionando)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Compilar desde el código fuente](#compilar-desde-el-código-fuente)
 - [Usuarios y roles](#usuarios-y-roles)
@@ -18,6 +19,20 @@ PawOS no es una distribución armada desde cero: es Debian 13 oficial, con un pr
 - [Seguridad — estado actual](#seguridad--estado-actual)
 - [Respaldo en la nube — estado actual](#respaldo-en-la-nube--estado-actual)
 - [Requerimientos mínimos del curso — checklist](#requerimientos-mínimos-del-curso--checklist)
+
+## De cero a un sistema operativo funcionando
+
+Esta sección resume, en orden, todo el camino desde el código fuente (C + Ensamblador) hasta tener PawOS corriendo como un sistema operativo real. Cada paso enlaza con la sección donde está explicado a detalle.
+
+**1. El código fuente son dos lenguajes distintos, compilados por separado.** La lógica del programa está en C (`src/*.c`); una sola pieza, el cálculo del checksum de integridad, está escrita directamente en Ensamblador x86-64 (`src/checksum.asm`). `gcc` compila cada `.c` a un objeto `.o`; `nasm` compila el `.asm` a otro objeto `.o` (mismo formato, ELF64). Ver [Compilar desde el código fuente](#compilar-desde-el-código-fuente) para los comandos, y [Integridad de datos](#módulos-del-programa) para el detalle exacto de cómo se enlazan ambos lenguajes en un solo binario.
+
+**2. El enlazador (`gcc`, usado como *linker*) une todos los `.o` en binarios ejecutables.** De ahí salen cuatro programas: `pawos-refugio` (CLI), `pawos-refugio-gui` (GUI, requiere además las librerías de GTK3), `pawos-vacunas-check` (demonio de vacunas) y `pawos-monitoreo` (servidor HTTP). En este punto ya se puede correr PawOS directamente (`./pawos-refugio`), pero todavía no es "un sistema operativo": es solo un programa suelto sobre cualquier Linux con las librerías necesarias.
+
+**3. Convertir esos binarios en un sistema operativo instalado** es trabajo de `instalar-pawos.sh` (ver [Instalar PawOS sobre un Debian ya instalado](#instalar-pawos-sobre-un-debian-ya-instalado)): compila todo lo del paso 1-2, copia los binarios a `/usr/local/bin` (para que estén en el `PATH` de cualquier usuario), crea los usuarios/grupos de Linux reales (`admin_refugio`, etc.), registra los servicios de `systemd` para que el vigilante de vacunas y el respaldo corran solos, configura el firewall, y deja accesos directos en el escritorio. A partir de aquí, PawOS ya es parte del sistema operativo Debian que lo hospeda, no un programa aparte.
+
+**4. Empacar todo eso en una ISO booteable** es el trabajo de `live-build` (ver [Construir la ISO instalable](#construir-la-iso-instalable) y `live-iso/README_live_iso.md`): arma una imagen de Debian 13 desde cero, con los paquetes necesarios ya incluidos (`live-iso/package-lists/pawos.list.chroot`), y unos *hooks* (`live-iso/hooks/*.hook.chroot`) que corren automáticamente durante la construcción y hacen, dentro de esa imagen, básicamente lo mismo que `instalar-pawos.sh` (compilar, crear usuarios, servicios, permisos), más el branding visual (fondo de pantalla, logo, GRUB) y el instalador gráfico Calamares.
+
+**5. Booteando esa ISO** se obtiene un Debian en vivo con PawOS ya instalado y funcionando (sin tocar el disco todavía — es una demo/prueba). Para dejarlo instalado de forma permanente en una máquina o VM, se usa el ícono "Instalar PawOS" del escritorio (Calamares), que copia el sistema completo al disco duro. Ese sistema instalado ya es, en todo el sentido de la palabra, un sistema operativo: arranca solo, tiene sus propios usuarios y permisos, corre sus propios servicios en segundo plano, y sigue funcionando igual después de apagarlo y prenderlo de nuevo.
 
 ## Estructura del proyecto
 
@@ -141,6 +156,25 @@ También expone `POST /api/alerta`, un endpoint sin autenticación pensado para 
 
 Verifica que la base de datos de donantes no se haya modificado por fuera del programa, calculando un checksum (rotación + XOR byte por byte) escrito directamente en **Ensamblador x86-64** (`checksum.asm`), y comparándolo contra el último checksum guardado.
 
+**Cómo se enlaza el Ensamblador con el C, exactamente:**
+
+`checksum.asm` define una sola rutina, `pawos_checksum`, con esta firma equivalente en C:
+
+```c
+uint64_t pawos_checksum(const unsigned char *datos, size_t len);
+```
+
+El algoritmo, instrucción por instrucción: por cada byte del arreglo `datos`, rota el acumulador (`rax`) 5 bits a la izquierda (`rol rax, 5`) y le hace XOR con el byte actual (`xor rax, rdx`). Al final, `rax` (que en la convención de llamadas de Linux x86-64, System V AMD64, es donde va el valor de retorno de una función) contiene el checksum de 64 bits. Los dos parámetros llegan en registros, no en la pila: `rdi` trae el puntero `datos` y `rsi` trae `len` — así es como System V AMD64 pasa el primer y segundo argumento de cualquier función, sea C o Ensamblador.
+
+Gracias a que ambos lados (el código que genera `gcc` a partir de los `.c`, y el código que genera `nasm` a partir del `.asm`) respetan esa misma convención y el mismo formato de archivo objeto (ELF64), no hace falta ningún "pegamento" especial para unirlos:
+
+1. `nasm -f elf64 src/checksum.asm -o src/checksum.o` — convierte el Ensamblador en un archivo objeto ELF64, con `pawos_checksum` marcada como símbolo `global` (visible desde fuera, para que otros `.o` lo puedan referenciar).
+2. `include/checksum.h` declara esa misma función con `extern` del lado de C, para que el compilador sepa que existe aunque no vea su código fuente.
+3. `integridad.c` la llama como cualquier función normal: `uint64_t resultado = pawos_checksum(buf, usado);` (usando el contenido del respaldo de donantes como `datos`).
+4. En el paso final, `gcc` no compila el `.asm` — solo **enlaza** `checksum.o` junto con todos los `.o` de C en un solo binario (`gcc $(OBJ) $(ASM_OBJ) -o pawos-refugio $(LDFLAGS)`). Para el enlazador, un símbolo es un símbolo: no le importa si el `.o` vino de C o de Ensamblador, siempre que los nombres y la convención de llamada coincidan.
+
+`integridad_actualizar_checksum_donantes()` guarda ese resultado en un archivo (`donantes.checksum`); `integridad_verificar_donantes()` (nombre real puede variar, ver `integridad.c`) vuelve a calcularlo y lo compara — si no coinciden, alguien modificó la base de donantes por fuera del programa.
+
 ## Personalización del sistema (branding)
 
 `branding/personalizar_pawos.sh` aplica, sobre un Debian 13 ya instalado: fondo de pantalla y logo propios, mensaje de `/etc/issue` y `/etc/motd`, nombre del sistema en `/etc/os-release`, nombre en el menú de arranque de GRUB, y accesos directos de escritorio para cada usuario.
@@ -156,7 +190,86 @@ Este script (pensado para correr sobre una instalación normal de Debian 13) hac
 
 ## Construir la ISO instalable
 
-Para entregar PawOS como una ISO booteable (arranca directo a un escritorio PawOS ya funcionando, con un ícono "Instalar PawOS" para copiarlo de forma permanente al disco vía Calamares), ver la guía completa dentro de `live-iso/README_live_iso.md`. En resumen usa `live-build`, con la configuración de paquetes y los hooks que están en esa misma carpeta.
+Esto arma un archivo `.iso` real: al arrancarlo (DVD, USB, o unidad óptica virtual) carga directo un escritorio Debian + GNOME con PawOS ya compilado, con los tres usuarios y todos los servicios listos, más un ícono "Instalar PawOS" en el escritorio que copia el sistema completo al disco de forma permanente (vía Calamares). No modifica ni reemplaza `instalar-pawos.sh`; es un proceso aparte, pensado para generar un medio de instalación distribuible.
+
+Usa la herramienta `live-build` de Debian, que arma la imagen paquete por paquete (no clona una ISO existente): descarga Debian 13 desde los repositorios oficiales, instala GNOME y las dependencias, y encima corre los **hooks** propios de PawOS (scripts que viven en `live-iso/hooks/`) dentro de ese sistema recién armado, antes de sellarlo en el `.iso` final.
+
+### 1. Requisito de espacio
+
+Se necesita una partición o disco aparte con al menos ~30 GB libres, montado por ejemplo en `/mnt/build` — la imagen completa de Debian + GNOME + PawOS ocupa bastante mientras se arma.
+
+### 2. Instalar `live-build`
+
+```bash
+sudo apt update
+sudo apt install -y live-build
+```
+
+### 3. Preparar la configuración
+
+```bash
+mkdir -p /mnt/build/pawos-live
+cd /mnt/build/pawos-live
+
+lb config \
+  --distribution trixie \
+  --archive-areas "main contrib non-free non-free-firmware" \
+  --binary-images iso-hybrid \
+  --debian-installer none
+
+mkdir -p config/package-lists config/hooks/normal config/includes.chroot
+cp live-iso/package-lists/*.chroot config/package-lists/
+cp live-iso/hooks/*.chroot config/hooks/normal/
+cp -r live-iso/includes.chroot/* config/includes.chroot/
+chmod +x config/hooks/normal/*.hook.chroot
+```
+
+`lb config` define el "molde" de la imagen (Debian 13/Trixie, con los repositorios `contrib`/`non-free` habilitados para drivers, formato ISO híbrido que sirve tanto para DVD como para USB, y sin el instalador de texto de Debian porque PawOS trae el suyo propio con Calamares).
+
+**Paso importante que no se automatiza:** el hook `0100-pawos-instalar.hook.chroot` compila PawOS desde `/opt/pawos` **dentro** de la imagen, así que el código fuente actualizado hay que copiarlo ahí también, antes de construir:
+
+```bash
+cp -r ~/S.O.-1-ProyectoFinal-PawOS/* config/includes.chroot/opt/pawos/
+```
+
+(Se hace así, copiando el repo local ya actualizado, en vez de que el hook clone desde GitHub durante la construcción, para no depender de credenciales de git ni de que el repo remoto esté disponible en ese momento.)
+
+### 4. Qué hace cada hook, en orden
+
+`live-build` corre los hooks en orden alfabético por su prefijo numérico:
+
+| Hook | Qué hace |
+|---|---|
+| `0100-pawos-instalar.hook.chroot` | Compila PawOS (`make all && make gui`) desde `/opt/pawos`, instala los binarios en `/usr/local/bin`, crea los tres usuarios y grupos, agrega `admin_refugio` al grupo `sudo` (necesario para Calamares), instala los servicios de systemd (solo `enable`, no `--now`, porque el chroot no tiene un systemd real corriendo), configura sudoers y firewall. |
+| `0200-pawos-branding.hook.chroot` | Aplica la personalización visual: `/etc/issue`, `/etc/motd`, `PRETTY_NAME` en `/etc/os-release`, y corrige permisos de los archivos de branding (fondo de pantalla, iconos) para que no queden ilegibles por el usuario de la sesión. |
+| `0900-pawos-fix-permisos-final.hook.chroot` | Pasada final de permisos (por si algo llegó restringido vía `includes.chroot`), quita el asistente de bienvenida de GNOME (`gnome-initial-setup`/`gnome-tour`), y agrega el acceso directo "Instalar PawOS" (Calamares) al escritorio de los tres usuarios. Corre último a propósito, para pisar cualquier permiso incorrecto que hayan dejado los hooks anteriores. |
+
+### 5. Construir la ISO
+
+Tarda bastante (baja el sistema completo de GNOME desde los repositorios de Debian, compila PawOS, aplica todos los hooks) — de 30 minutos a más de una hora, según la conexión. Necesita permisos de root reales (no `sudo -n`, porque manipula el sistema de archivos a bajo nivel):
+
+```bash
+cd /mnt/build/pawos-live
+sudo lb build 2>&1 | tee build.log
+```
+
+Si algo falla, el error queda al final de `build.log`. Al terminar, el archivo queda en esa misma carpeta, con un nombre como `live-image-amd64.hybrid.iso`.
+
+### 6. Probarla
+
+Antes de usarla como entrega final, se prueba arrancándola en una VM nueva (no la de desarrollo, para no arriesgar nada):
+
+1. Crear una VM nueva en VirtualBox.
+2. Montar `live-image-amd64.hybrid.iso` como unidad óptica (IDE, no SATA — más confiable en VirtualBox).
+3. Arrancar y confirmar: que carga el escritorio con el fondo de pantalla de PawOS, que se puede iniciar sesión con `admin_refugio` / `veterinario1` / `voluntario1`, que `pawos-refugio-gui` abre y funciona, y que el ícono "Instalar PawOS" deja el sistema instalado de forma permanente en el disco virtual.
+
+### 7. Para USB booteable (opcional)
+
+Con Rufus (Windows): seleccionar el `.iso`, modo "DD Image" (no "ISO normal", para que quede booteable como sistema live) y grabarlo en el USB.
+
+### 8. Si el código cambia después
+
+Como el código se copia una sola vez a `config/includes.chroot/opt/pawos/` en el paso 3, si el repositorio se actualiza hay que repetir ese `cp` con el código nuevo y volver a correr `sudo lb build` (o `sudo lb clean && sudo lb build` para forzar que se vuelva a descargar todo desde cero) para que la ISO quede al día.
 
 ## Servicios del sistema (systemd)
 
@@ -175,20 +288,50 @@ Lo que **falta** (pendiente, útil dejarlo anotado para la entrega): las contras
 
 ## Respaldo en la nube — estado actual
 
-El script `pawos-backup-nube` sube la base de datos y la carpeta de respaldos de archivos a Google Drive usando `rclone`, con un remote llamado `ggdrive` configurado (`rclone config`) en la cuenta de **root** (`/root/.config/rclone/rclone.conf`), ya que el servicio corre como root. Confirmado funcionando: cada corrida sube el archivo y termina en pocos segundos (ver logs con `sudo journalctl -u pawos-backup.service`).
+### Cómo funciona por debajo
 
-Desde la pantalla "Respaldo en la Nube" del GUI (solo visible/editable para `admin_refugio`), se puede elegir entre dos modos:
+El script `/usr/local/bin/pawos-backup-nube` (instalado por `instalar-pawos.sh`) hace el trabajo real: copia `/var/pawos/pawos.db` a Google Drive con `rclone copyto` (nombrando el archivo con fecha y hora, `pawos_AAAAMMDD_HHMMSS.db`, para no pisar respaldos anteriores) y sincroniza la carpeta `/var/pawos/archivos/backups` con `rclone copy`. Usa un remote de `rclone` llamado `ggdrive`, que apunta a una cuenta real de Google Drive.
 
-- **Automático** — corre solo, con el intervalo que elija el administrador: cada 1 día, 3 días, 1 semana o 1 mes. Internamente ajusta `pawos-backup.timer` con un *override* de systemd (`/etc/systemd/system/pawos-backup.timer.d/override.conf`, con `OnUnitActiveSec`).
-- **Manual** — el timer se desactiva; el respaldo solo corre cuando alguien presiona "Respaldar ahora" (dispara `pawos-backup.service` una sola vez, sin esperar).
-
-El cambio de modo lo hace el script `/usr/local/bin/pawos-configurar-respaldo` (`manual` o `auto <horas>`), invocado por el GUI vía `sudo` sin contraseña (regla específica en `/etc/sudoers.d/pawos-respaldo`, solo para el grupo `pawos-admin`). El botón "Respaldar ahora" usa `systemctl --no-block start pawos-backup.service` para no congelar la interfaz mientras el respaldo corre en segundo plano; el estado real se consulta después con "Actualizar estado".
-
-Si se instala PawOS en una máquina nueva, ese `rclone config` sí hay que volver a correrlo una vez (no viaja con el código, es una credencial local de cada instalación):
+Ese script lo ejecuta el servicio systemd `pawos-backup.service` (`Type=oneshot`, corre una vez y termina), disparado por el timer `pawos-backup.timer`. El servicio corre como **root**, así que la configuración de `rclone` que usa es la de la cuenta root (`/root/.config/rclone/rclone.conf`), no la del usuario que inició sesión gráficamente — importante tenerlo en cuenta si algún día hay que reconfigurar la cuenta de Drive:
 
 ```bash
-sudo rclone config    # crear un remote llamado "ggdrive" apuntando a Google Drive
+sudo rclone config    # crear/editar el remote "ggdrive"
 ```
+
+Confirmado funcionando en la práctica: cada corrida sube el archivo y termina en pocos segundos (`sudo journalctl -u pawos-backup.service` para ver el historial completo, con hora exacta de cada respaldo).
+
+### Pantalla "Respaldo en la Nube" del GUI (`abrir_pantalla_respaldo` en `main_gtk.c`)
+
+Accesible para cualquier rol, pero solo **admin_refugio** puede tocar los controles (el resto los ve deshabilitados con un tooltip "Requiere rol Administrador" — mismo patrón que las pantallas de Procesos y Memoria). Tiene tres secciones:
+
+**Estado actual** — dos etiquetas de solo lectura que se llenan preguntándole a systemd (`systemctl show ... --value -p ActiveState/Result/LastTriggerUSec`), sin necesitar permisos especiales porque es una consulta, no una acción:
+- "Último respaldo automático": la última vez que se disparó el timer.
+- "Estado del servicio: `<ActiveState>` | Resultado: `<Result>`" — por ejemplo `inactive` / `success` cuando ya terminó bien, o `activating` mientras sigue corriendo.
+
+**Configuración del respaldo** — dos radio buttons controlan el modo:
+- **Automático** — habilita un combo box con 4 intervalos (Cada 1 día / 3 días / 1 semana / 1 mes, que internamente son 24/72/168/720 horas).
+- **Manual (solo con 'Respaldar ahora')** — deshabilita el combo; el respaldo solo corre si alguien lo dispara a mano.
+
+Al presionar "Guardar configuración", el GUI llama (vía `sudo -n`, sin pedir contraseña) al script `/usr/local/bin/pawos-configurar-respaldo`:
+- `pawos-configurar-respaldo manual` → apaga y deshabilita `pawos-backup.timer`, borra el *override* de horario si existía.
+- `pawos-configurar-respaldo auto <horas>` → escribe un *override* de systemd en `/etc/systemd/system/pawos-backup.timer.d/override.conf` (limpia el `OnCalendar` original de "todos los días a las 11pm" y lo reemplaza por `OnUnitActiveSec=<horas>h`, es decir "cada tantas horas desde la última vez que corrió"), recarga systemd y habilita el timer.
+
+En ambos casos el script deja registrado el modo elegido en `/var/pawos/backup_modo.txt` (por ejemplo `manual` o `automatico:72`), que es lo que el GUI vuelve a leer cada vez que abre la pantalla para mostrar el modo actual ya seleccionado.
+
+**Botones inferiores**:
+- "Actualizar estado" — vuelve a consultar systemd y refresca las dos etiquetas de arriba.
+- "Respaldar ahora" — dispara `sudo -n systemctl --no-block start pawos-backup.service`. La bandera `--no-block` es importante: sin ella, `systemctl start` espera a que el servicio termine por completo antes de devolver el control, lo cual congelaba la ventana entre 20 y 30 segundos (todo el programa se queda esperando esa única llamada, porque la GUI es de un solo hilo). Con `--no-block`, systemd solo encola la orden y el botón responde al instante; el resultado real hay que verlo después con "Actualizar estado".
+- "Cerrar" — cierra la ventana.
+
+### Permisos (sudoers)
+
+Todo esto funciona sin pedir contraseña gracias a una regla específica en `/etc/sudoers.d/pawos-respaldo`, que solo aplica al grupo `pawos-admin` (o sea, solo `admin_refugio`) y solo para estos dos comandos exactos:
+
+```
+%pawos-admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl --no-block start pawos-backup.service, /usr/local/bin/pawos-configurar-respaldo
+```
+
+Si algún día se cambian los argumentos de cualquiera de esos dos comandos en el código C, hay que actualizar esta línea de sudoers para que coincida exactamente, o `sudo -n` fallará en silencio (sin pedir contraseña, pero sin ejecutar nada).
 
 ## Requerimientos mínimos del curso — checklist
 
