@@ -7,6 +7,7 @@ PawOS no es una distribución armada desde cero: es Debian 13 oficial, con un pr
 ## Índice
 
 - [De cero a un sistema operativo funcionando](#de-cero-a-un-sistema-operativo-funcionando)
+- [Requisitos del sistema y librerías](#requisitos-del-sistema-y-librerías)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Compilar desde el código fuente](#compilar-desde-el-código-fuente)
 - [Usuarios y roles](#usuarios-y-roles)
@@ -33,6 +34,49 @@ Esta sección resume, en orden, todo el camino desde el código fuente (C + Ensa
 **4. Empacar todo eso en una ISO booteable** es el trabajo de `live-build` (ver [Construir la ISO instalable](#construir-la-iso-instalable) y `live-iso/README_live_iso.md`): arma una imagen de Debian 13 desde cero, con los paquetes necesarios ya incluidos (`live-iso/package-lists/pawos.list.chroot`), y unos *hooks* (`live-iso/hooks/*.hook.chroot`) que corren automáticamente durante la construcción y hacen, dentro de esa imagen, básicamente lo mismo que `instalar-pawos.sh` (compilar, crear usuarios, servicios, permisos), más el branding visual (fondo de pantalla, logo, GRUB) y el instalador gráfico Calamares.
 
 **5. Booteando esa ISO** se obtiene un Debian en vivo con PawOS ya instalado y funcionando (sin tocar el disco todavía — es una demo/prueba). Para dejarlo instalado de forma permanente en una máquina o VM, se usa el ícono "Instalar PawOS" del escritorio (Calamares), que copia el sistema completo al disco duro. Ese sistema instalado ya es, en todo el sentido de la palabra, un sistema operativo: arranca solo, tiene sus propios usuarios y permisos, corre sus propios servicios en segundo plano, y sigue funcionando igual después de apagarlo y prenderlo de nuevo.
+
+## Requisitos del sistema y librerías
+
+### Hardware mínimo
+
+PawOS corre sobre Debian 13 + escritorio GNOME completo, así que hereda los requisitos de eso (GNOME es el componente más pesado, no PawOS en sí):
+
+| Recurso | Mínimo | Recomendado |
+|---|---|---|
+| Arquitectura | x86-64 (amd64) | x86-64 (amd64) |
+| RAM | 2 GB | 4 GB o más |
+| Disco (sistema ya instalado) | 10 GB | 20 GB o más |
+| Disco (solo para *armar* la ISO, aparte) | — | ~30 GB libres, ver [Construir la ISO instalable](#construir-la-iso-instalable) |
+
+### Paquetes del sistema operativo base (Debian 13)
+
+Estos son los paquetes de Debian que se instalan (ya sea con `instalar-pawos.sh` o dentro de la ISO vía `live-iso/package-lists/pawos.list.chroot`) para tener un sistema completo, más allá de PawOS mismo:
+
+| Paquete | Para qué es |
+|---|---|
+| `task-gnome-desktop` | El escritorio GNOME completo (solo en la ISO; sobre una Debian ya instalada se asume que ya existe un entorno gráfico) |
+| `network-manager` / `network-manager-applet` | Manejo de red (WiFi/Ethernet) con interfaz gráfica |
+| `sudo` | Permite a los usuarios de PawOS ejecutar comandos puntuales como root (apagar, reiniciar, instalar, respaldar) |
+| `git` | Control de versiones (para trabajar sobre el código fuente) |
+| `ufw` | Firewall (ver [Firewall](#seguridad--estado-actual)) |
+| `sqlite3` | Cliente de línea de comandos de SQLite (para inspeccionar `pawos.db` manualmente si hace falta) |
+| `calamares` / `calamares-settings-debian` | Instalador gráfico (solo en la ISO, para dejar PawOS instalado de forma permanente) |
+
+### Librerías para compilar y correr PawOS (nuestro programa)
+
+Estos son los paquetes que el propio código de PawOS necesita — para compilarlo (`-dev`) y, en tiempo de ejecución, la librería compartida correspondiente:
+
+| Paquete (compilación) | Para qué lo usa PawOS |
+|---|---|
+| `build-essential` | `gcc`, `make` y las herramientas básicas para compilar C |
+| `libncurses-dev` | Interfaz de texto del CLI (`pawos-refugio`): menús, formularios, colores en la terminal |
+| `libsqlite3-dev` | Base de datos (`db.c`) — mascotas, vacunas, adopciones, donantes, usuarios, alertas |
+| `libgtk-3-dev` | Interfaz gráfica del GUI (`pawos-refugio-gui`); trae consigo (como dependencias) GLib, Pango, Cairo, GdkPixbuf, AT-SPI/ATK, HarfBuzz — todo lo que GTK3 necesita para dibujar ventanas, texto y widgets |
+| `pkg-config` | Herramienta que le dice al compilador dónde están los headers y librerías de GTK3 (`pkg-config --cflags/--libs gtk+-3.0`) |
+| `nasm` | Ensamblador: compila `checksum.asm` a un objeto ELF64 (ver [De cero a un sistema operativo funcionando](#de-cero-a-un-sistema-operativo-funcionando)) |
+| `libcrypt-dev` | Hasheo de contraseñas con `crypt()` (SHA-512) — ver [Seguridad](#seguridad--estado-actual) |
+
+En tiempo de ejecución, el `Makefile` enlaza cada binario con `-lncurses -lsqlite3 -lm -lcrypt` (CLI/demonio/monitor) o con las librerías de GTK3 que entrega `pkg-config` (GUI) — `-lm` es la librería matemática de C (siempre disponible con glibc, usada por ejemplo en los cálculos de porcentajes de CPU/memoria del servidor de monitoreo).
 
 ## Estructura del proyecto
 
