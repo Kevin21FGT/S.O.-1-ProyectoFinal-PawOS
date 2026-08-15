@@ -190,7 +190,86 @@ Este script (pensado para correr sobre una instalación normal de Debian 13) hac
 
 ## Construir la ISO instalable
 
-Para entregar PawOS como una ISO booteable (arranca directo a un escritorio PawOS ya funcionando, con un ícono "Instalar PawOS" para copiarlo de forma permanente al disco vía Calamares), ver la guía completa dentro de `live-iso/README_live_iso.md`. En resumen usa `live-build`, con la configuración de paquetes y los hooks que están en esa misma carpeta.
+Esto arma un archivo `.iso` real: al arrancarlo (DVD, USB, o unidad óptica virtual) carga directo un escritorio Debian + GNOME con PawOS ya compilado, con los tres usuarios y todos los servicios listos, más un ícono "Instalar PawOS" en el escritorio que copia el sistema completo al disco de forma permanente (vía Calamares). No modifica ni reemplaza `instalar-pawos.sh`; es un proceso aparte, pensado para generar un medio de instalación distribuible.
+
+Usa la herramienta `live-build` de Debian, que arma la imagen paquete por paquete (no clona una ISO existente): descarga Debian 13 desde los repositorios oficiales, instala GNOME y las dependencias, y encima corre los **hooks** propios de PawOS (scripts que viven en `live-iso/hooks/`) dentro de ese sistema recién armado, antes de sellarlo en el `.iso` final.
+
+### 1. Requisito de espacio
+
+Se necesita una partición o disco aparte con al menos ~30 GB libres, montado por ejemplo en `/mnt/build` — la imagen completa de Debian + GNOME + PawOS ocupa bastante mientras se arma.
+
+### 2. Instalar `live-build`
+
+```bash
+sudo apt update
+sudo apt install -y live-build
+```
+
+### 3. Preparar la configuración
+
+```bash
+mkdir -p /mnt/build/pawos-live
+cd /mnt/build/pawos-live
+
+lb config \
+  --distribution trixie \
+  --archive-areas "main contrib non-free non-free-firmware" \
+  --binary-images iso-hybrid \
+  --debian-installer none
+
+mkdir -p config/package-lists config/hooks/normal config/includes.chroot
+cp live-iso/package-lists/*.chroot config/package-lists/
+cp live-iso/hooks/*.chroot config/hooks/normal/
+cp -r live-iso/includes.chroot/* config/includes.chroot/
+chmod +x config/hooks/normal/*.hook.chroot
+```
+
+`lb config` define el "molde" de la imagen (Debian 13/Trixie, con los repositorios `contrib`/`non-free` habilitados para drivers, formato ISO híbrido que sirve tanto para DVD como para USB, y sin el instalador de texto de Debian porque PawOS trae el suyo propio con Calamares).
+
+**Paso importante que no se automatiza:** el hook `0100-pawos-instalar.hook.chroot` compila PawOS desde `/opt/pawos` **dentro** de la imagen, así que el código fuente actualizado hay que copiarlo ahí también, antes de construir:
+
+```bash
+cp -r ~/S.O.-1-ProyectoFinal-PawOS/* config/includes.chroot/opt/pawos/
+```
+
+(Se hace así, copiando el repo local ya actualizado, en vez de que el hook clone desde GitHub durante la construcción, para no depender de credenciales de git ni de que el repo remoto esté disponible en ese momento.)
+
+### 4. Qué hace cada hook, en orden
+
+`live-build` corre los hooks en orden alfabético por su prefijo numérico:
+
+| Hook | Qué hace |
+|---|---|
+| `0100-pawos-instalar.hook.chroot` | Compila PawOS (`make all && make gui`) desde `/opt/pawos`, instala los binarios en `/usr/local/bin`, crea los tres usuarios y grupos, agrega `admin_refugio` al grupo `sudo` (necesario para Calamares), instala los servicios de systemd (solo `enable`, no `--now`, porque el chroot no tiene un systemd real corriendo), configura sudoers y firewall. |
+| `0200-pawos-branding.hook.chroot` | Aplica la personalización visual: `/etc/issue`, `/etc/motd`, `PRETTY_NAME` en `/etc/os-release`, y corrige permisos de los archivos de branding (fondo de pantalla, iconos) para que no queden ilegibles por el usuario de la sesión. |
+| `0900-pawos-fix-permisos-final.hook.chroot` | Pasada final de permisos (por si algo llegó restringido vía `includes.chroot`), quita el asistente de bienvenida de GNOME (`gnome-initial-setup`/`gnome-tour`), y agrega el acceso directo "Instalar PawOS" (Calamares) al escritorio de los tres usuarios. Corre último a propósito, para pisar cualquier permiso incorrecto que hayan dejado los hooks anteriores. |
+
+### 5. Construir la ISO
+
+Tarda bastante (baja el sistema completo de GNOME desde los repositorios de Debian, compila PawOS, aplica todos los hooks) — de 30 minutos a más de una hora, según la conexión. Necesita permisos de root reales (no `sudo -n`, porque manipula el sistema de archivos a bajo nivel):
+
+```bash
+cd /mnt/build/pawos-live
+sudo lb build 2>&1 | tee build.log
+```
+
+Si algo falla, el error queda al final de `build.log`. Al terminar, el archivo queda en esa misma carpeta, con un nombre como `live-image-amd64.hybrid.iso`.
+
+### 6. Probarla
+
+Antes de usarla como entrega final, se prueba arrancándola en una VM nueva (no la de desarrollo, para no arriesgar nada):
+
+1. Crear una VM nueva en VirtualBox.
+2. Montar `live-image-amd64.hybrid.iso` como unidad óptica (IDE, no SATA — más confiable en VirtualBox).
+3. Arrancar y confirmar: que carga el escritorio con el fondo de pantalla de PawOS, que se puede iniciar sesión con `admin_refugio` / `veterinario1` / `voluntario1`, que `pawos-refugio-gui` abre y funciona, y que el ícono "Instalar PawOS" deja el sistema instalado de forma permanente en el disco virtual.
+
+### 7. Para USB booteable (opcional)
+
+Con Rufus (Windows): seleccionar el `.iso`, modo "DD Image" (no "ISO normal", para que quede booteable como sistema live) y grabarlo en el USB.
+
+### 8. Si el código cambia después
+
+Como el código se copia una sola vez a `config/includes.chroot/opt/pawos/` en el paso 3, si el repositorio se actualiza hay que repetir ese `cp` con el código nuevo y volver a correr `sudo lb build` (o `sudo lb clean && sudo lb build` para forzar que se vuelva a descargar todo desde cero) para que la ISO quede al día.
 
 ## Servicios del sistema (systemd)
 
