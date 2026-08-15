@@ -284,6 +284,23 @@ Como el código se copia una sola vez a `config/includes.chroot/opt/pawos/` en e
 
 Lo que está implementado: firewall configurado (ufw), permisos de sudo restringidos por usuario (solo apagar/reiniciar, excepto `admin_refugio` que también puede usar el instalador y el respaldo), verificación de integridad de la base de donantes por checksum, y **contraseñas hasheadas** (no en texto plano) tanto en el login del CLI como en el servidor de monitoreo.
 
+### Firewall (`ufw`)
+
+`instalar-pawos.sh` configura `ufw` (Uncomplicated Firewall, la interfaz simplificada de Debian sobre `netfilter`/`iptables`) con estas reglas, en este orden:
+
+```bash
+ufw default deny incoming    # por defecto, rechaza toda conexion entrante
+ufw default allow outgoing   # pero permite que PawOS mismo inicie conexiones salientes (ej. rclone)
+ufw allow from 192.168.0.0/16 to any port 8080 proto tcp   # dashboard: solo redes locales tipo 192.168.x.x
+ufw allow from 10.0.0.0/8    to any port 8080 proto tcp    # solo redes locales tipo 10.x.x.x
+ufw allow from 172.16.0.0/12 to any port 8080 proto tcp    # solo redes locales tipo 172.16-31.x.x
+ufw --force enable
+```
+
+La idea: por defecto Linux no bloquea nada, así que sin firewall cualquier persona en cualquier red podría llegar al puerto 8080 (el dashboard de monitoreo) o a cualquier otro puerto que termine abierto. Con estas reglas, **todo** el tráfico entrante se rechaza excepto el puerto 8080, y ese puerto **solo** responde a las tres redes privadas típicas de una LAN doméstica/institucional (`192.168.x.x`, `10.x.x.x`, `172.16.0.0`–`172.31.255.255`) — nunca desde una IP pública de Internet. El tráfico saliente se deja libre porque PawOS necesita poder conectarse afuera (por ejemplo, para subir el respaldo a Google Drive con `rclone`).
+
+En la ISO, el hook `0100-pawos-instalar.hook.chroot` deja las reglas ya escritas y el servicio `ufw` habilitado, pero no ejecuta `ufw enable` dentro del chroot (manipular `netfilter` sin un kernel real corriendo ahí no es confiable); las reglas quedan activas solas en el primer arranque real de la ISO ya instalada.
+
 ### Cómo funciona el hasheo de contraseñas
 
 Se usa `crypt()` de la librería estándar de C, con el algoritmo SHA-512 (los hashes que genera empiezan con el prefijo `$6$`). `crypt()` recibe la contraseña en texto plano más una "sal" (una cadena aleatoria) y devuelve un hash que incluye esa misma sal al principio, por eso no hace falta guardar la sal aparte: el hash guardado ya trae todo lo necesario para volver a verificarlo después.
