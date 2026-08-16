@@ -1,0 +1,9 @@
+[Unit]
+Description=Ejecuta el respaldo a la nube de PawOS una vez al dia
+
+[Timer]
+OnCalendar=*-*-* 23:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

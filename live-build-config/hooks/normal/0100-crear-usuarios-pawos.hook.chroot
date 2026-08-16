@@ -14,6 +14,12 @@ fi
 crear_usuario admin_refugio  pawos-admin       admin123
 crear_usuario veterinario1   pawos-veterinario vet123
 crear_usuario voluntario1    pawos-voluntario  vol123
+# admin_refugio necesita estar en el grupo "sudo" para poder autenticarse
+# como Administrador cuando Calamares (el instalador grafico) pide permisos
+# para escribir en el disco. Los otros dos usuarios NO se agregan a sudo a
+# proposito (solo tienen permiso de apagar/reiniciar, via sudoers aparte).
+usermod -aG sudo admin_refugio
+
 mkdir -p /var/pawos/reportes
 chown -R root:pawos-refugio /var/pawos
 chmod -R 2770 /var/pawos
@@ -28,3 +34,18 @@ cat > /etc/sudoers.d/pawos-respaldo << 'SUDOEOF2'
 %pawos-admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl --no-block start pawos-backup.service, /usr/local/bin/pawos-configurar-respaldo, /usr/local/bin/pawos-listar-respaldos, /usr/local/bin/pawos-restaurar-nube, /usr/local/bin/pawos-backup-nube
 SUDOEOF2
 chmod 440 /etc/sudoers.d/pawos-respaldo
+# Icono de Calamares (instalador grafico) solo para admin_refugio, ya que
+# es el unico usuario en el grupo sudo. El paquete "calamares" puede traer
+# su .desktop con uno de dos nombres distintos segun la version, asi que
+# se intentan los dos (el que no exista simplemente falla en silencio,
+# "|| true").
+if id admin_refugio &>/dev/null; then
+    HOME_ADMIN=$(getent passwd admin_refugio | cut -d: -f6)
+    mkdir -p "$HOME_ADMIN/Desktop"
+    cp /usr/share/applications/calamares.desktop "$HOME_ADMIN/Desktop/Instalar-PawOS.desktop" 2>/dev/null || true
+    cp /usr/share/applications/org.calamares.calamares.desktop "$HOME_ADMIN/Desktop/Instalar-PawOS.desktop" 2>/dev/null || true
+    if [ -f "$HOME_ADMIN/Desktop/Instalar-PawOS.desktop" ]; then
+        chmod 755 "$HOME_ADMIN/Desktop/Instalar-PawOS.desktop"
+        chown admin_refugio:admin_refugio "$HOME_ADMIN/Desktop/Instalar-PawOS.desktop"
+    fi
+fi

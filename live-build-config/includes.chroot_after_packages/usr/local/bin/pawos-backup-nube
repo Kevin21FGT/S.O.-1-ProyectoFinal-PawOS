@@ -1,0 +1,36 @@
+
+#!/bin/bash
+set -e
+REMOTE="ggdrive:PawOS_Backups"
+FECHA=$(date +%Y%m%d_%H%M%S_%N); FECHA="${FECHA:0:19}"
+
+ETIQUETA_RAW="$1"
+if [ -z "$ETIQUETA_RAW" ] && [ -f /var/pawos/backup_etiqueta_auto.txt ]; then
+    ETIQUETA_RAW=$(cat /var/pawos/backup_etiqueta_auto.txt)
+fi
+
+ETIQUETA=""
+if [ -n "$ETIQUETA_RAW" ]; then
+    ETIQUETA=$(printf '%s' "$ETIQUETA_RAW" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-40)
+fi
+if [ -n "$ETIQUETA" ]; then
+    NOMBRE_ARCHIVO="pawos_${FECHA}_${ETIQUETA}.db"
+else
+NOMBRE_ARCHIVO="pawos_${FECHA}.db"
+fi
+
+if [ -f /var/pawos/pawos.db ]; then
+    DB="/var/pawos/pawos.db"
+else
+    DB="pawos.db"
+fi
+if [ -f "$DB" ]; then
+    rclone copyto "$DB" "$REMOTE/$NOMBRE_ARCHIVO"
+    echo "[$(date)] Respaldo de base de datos subido: $NOMBRE_ARCHIVO"
+else
+    echo "[$(date)] No se encontro la base de datos, no se pudo respaldar."
+fi
+if [ -d /var/pawos/archivos/backups ]; then
+    rclone copy /var/pawos/archivos/backups "$REMOTE/archivos_backups"
+    echo "[$(date)] Carpeta de respaldos de archivos sincronizada."
+fi

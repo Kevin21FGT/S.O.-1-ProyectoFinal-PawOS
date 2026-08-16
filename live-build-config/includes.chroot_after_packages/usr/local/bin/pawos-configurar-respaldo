@@ -1,0 +1,37 @@
+
+#!/bin/bash
+set -e
+MODO="$1"
+HORAS="${2:-24}"
+ESTADO_FILE="/var/pawos/backup_modo.txt"
+mkdir -p /etc/systemd/system/pawos-backup.timer.d
+mkdir -p /var/pawos
+
+if [ "$MODO" = "manual" ]; then
+    systemctl disable --now pawos-backup.timer 2>/dev/null || true
+    rm -f /etc/systemd/system/pawos-backup.timer.d/override.conf
+    systemctl daemon-reload
+    echo "manual" > "$ESTADO_FILE"
+    echo "Respaldo automatico desactivado. Ahora es manual (boton 'Respaldar ahora')."
+    exit 0
+fi
+if [ "$MODO" = "auto" ]; then
+    case "$HORAS" in
+        ''|*[!0-9]*) echo "ERROR: horas debe ser un numero (ej. 24, 72, 168, 720)."; exit 1 ;;
+    esac
+    cat > /etc/systemd/system/pawos-backup.timer.d/override.conf << EOF
+[Timer]
+OnCalendar=
+OnBootSec=
+Persistent=
+OnUnitActiveSec=${HORAS}h
+Persistent=true
+EOF
+    systemctl daemon-reload
+    systemctl enable --now pawos-backup.timer
+    echo "automatico:${HORAS}" > "$ESTADO_FILE"
+    echo "Respaldo automatico activado, cada ${HORAS} horas."
+    exit 0
+fi
+echo "Uso: pawos-configurar-respaldo manual | auto <horas>"
+exit 1

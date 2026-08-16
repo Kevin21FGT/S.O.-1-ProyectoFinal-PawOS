@@ -1,0 +1,3 @@
+pcmanfm --desktop --profile pawos &
+sleep 1
+xterm -fullscreen -e /usr/local/bin/pawos-refugio &

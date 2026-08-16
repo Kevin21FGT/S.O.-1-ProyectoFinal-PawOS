@@ -1,6 +1,4 @@
 
-lightdm
-lightdm-gtk-greeter
 xserver-xorg
 xserver-xorg-video-fbdev
 openbox
@@ -11,3 +9,10 @@ pcmanfm
 ufw
 rclone
 python3
+calamares
+calamares-settings-debian
+task-gnome-desktop
+gdm3
+network-manager
+network-manager-applet
+gnome-shell-extension-desktop-icons-ng
