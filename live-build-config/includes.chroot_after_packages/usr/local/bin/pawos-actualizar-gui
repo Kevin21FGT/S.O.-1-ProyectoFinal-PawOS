@@ -1,0 +1,59 @@
+#!/bin/bash
+# pawos-actualizar-gui - Busca e instala la ultima version de PawOS
+# Refugio (CLI y GUI) directo desde GitHub, sin necesidad de una ISO
+# nueva. Pensado para lanzarse desde un boton dentro de la propia GUI
+# (en una terminal, para que se vea el progreso y funcione el sudo).
+set -e
+
+REPO_URL="https://github.com/Kevin21FGT/S.O.-1-ProyectoFinal-PawOS.git"
+REPO_DIR="$HOME/S.O.-1-ProyectoFinal-PawOS"
+RAMA="rama-Kevin"
+
+echo "======================================"
+echo "  PawOS - Buscador de actualizaciones"
+echo "======================================"
+echo ""
+
+if ! command -v git >/dev/null 2>&1; then
+  echo "ERROR: git no esta instalado. No se puede actualizar."
+  exit 1
+fi
+
+if [ -d "$REPO_DIR/.git" ]; then
+  echo "== Repositorio local encontrado, revisando cambios =="
+  cd "$REPO_DIR"
+  git fetch origin "$RAMA"
+  LOCAL=$(git rev-parse HEAD)
+  REMOTE=$(git rev-parse "origin/$RAMA")
+  if [ "$LOCAL" = "$REMOTE" ]; then
+    echo ""
+    echo "Ya tienes la ultima version. No hay nada que actualizar."
+    read -p "Presiona Enter para cerrar..."
+    exit 0
+  fi
+  echo "Hay una version nueva, actualizando..."
+  git checkout "$RAMA"
+  git pull origin "$RAMA"
+else
+  echo "== No hay copia local, clonando por primera vez (puede tardar) =="
+  git clone --branch "$RAMA" "$REPO_URL" "$REPO_DIR"
+  cd "$REPO_DIR"
+fi
+
+echo ""
+echo "== Recompilando PawOS Refugio (CLI y GUI) =="
+make clean-gui && make gui
+make clean && make
+
+echo ""
+echo "== Instalando (puede pedir tu contraseña de sudo) =="
+sudo cp pawos-refugio-gui /usr/local/bin/pawos-refugio-gui
+sudo cp pawos-refugio /usr/local/bin/pawos-refugio
+sudo chmod 755 /usr/local/bin/pawos-refugio-gui /usr/local/bin/pawos-refugio
+
+echo ""
+echo "======================================"
+echo "  Listo! PawOS se actualizo correctamente."
+echo "  Cierra y vuelve a abrir el programa para ver los cambios."
+echo "======================================"
+read -p "Presiona Enter para cerrar..."

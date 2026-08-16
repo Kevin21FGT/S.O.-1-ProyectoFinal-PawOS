@@ -2699,6 +2699,18 @@ static void on_alertas_clicked(GtkButton *boton, gpointer datos) {
     abrir_pantalla_alertas(d->ventana_principal, d->rol);
 }
 
+static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    (void)datos;
+    GError *error = NULL;
+    gboolean ok = g_spawn_command_line_async(
+        "x-terminal-emulator -e /usr/local/bin/pawos-actualizar-gui", &error);
+    if (!ok) {
+        g_warning("No se pudo abrir el actualizador: %s", error ? error->message : "error desconocido");
+        if (error) g_error_free(error);
+    }
+}
+
 static void construir_ventana_principal(Rol rol, const char *usuario) {
     GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ventana), "PawOS Refugio");
@@ -2820,6 +2832,13 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
             gtk_widget_set_tooltip_text(boton, "Requiere rol Administrador.");
         }
     }
+
+    GtkWidget *btn_actualizar = gtk_button_new_with_label("\xF0\x9F\x94\x84  Buscar Actualizaciones");
+    gtk_widget_set_size_request(btn_actualizar, 250, 46);
+    gtk_widget_set_halign(btn_actualizar, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text(btn_actualizar, "Busca la ultima version en GitHub y la instala.");
+    gtk_box_pack_start(GTK_BOX(caja), btn_actualizar, FALSE, FALSE, 0);
+    g_signal_connect(btn_actualizar, "clicked", G_CALLBACK(on_actualizar_clicked), NULL);
 
     GtkWidget *btn_salir = gtk_button_new_with_label("Salir");
     gtk_style_context_add_class(gtk_widget_get_style_context(btn_salir), "salir");
