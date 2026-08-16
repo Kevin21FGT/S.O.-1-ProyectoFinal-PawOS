@@ -1,12 +1,13 @@
+
 #!/bin/bash
 set -e
-for g in pawos-admin pawos-veterinario pawos-voluntario; do
+for g in pawos-admin pawos-veterinario pawos-voluntario pawos-refugio; do
     getent group "$g" >/dev/null || groupadd "$g"
 done
 crear_usuario() {
 local user=$1 grupo=$2 pass=$3
     if ! id "$user" &>/dev/null; then
-        useradd -m -G "$grupo" -s /bin/bash "$user"
+        useradd -m -G "$grupo,pawos-refugio" -s /bin/bash "$user"
         echo "${user}:${pass}" | chpasswd
 fi
 }
@@ -14,10 +15,8 @@ crear_usuario admin_refugio  pawos-admin       admin123
 crear_usuario veterinario1   pawos-veterinario vet123
 crear_usuario voluntario1    pawos-voluntario  vol123
 mkdir -p /var/pawos/reportes
-chown -R root:pawos-admin /var/pawos
+chown -R root:pawos-refugio /var/pawos
 chmod -R 2770 /var/pawos
-
-
 mkdir -p /etc/sudoers.d
 cat > /etc/sudoers.d/pawos-apagar << 'SUDOEOF'
 %pawos-admin ALL=(ALL) NOPASSWD: /sbin/poweroff, /sbin/reboot
@@ -25,3 +24,7 @@ cat > /etc/sudoers.d/pawos-apagar << 'SUDOEOF'
 %pawos-voluntario ALL=(ALL) NOPASSWD: /sbin/poweroff, /sbin/reboot
 SUDOEOF
 chmod 440 /etc/sudoers.d/pawos-apagar
+cat > /etc/sudoers.d/pawos-respaldo << 'SUDOEOF2'
+%pawos-admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl --no-block start pawos-backup.service, /usr/local/bin/pawos-configurar-respaldo, /usr/local/bin/pawos-listar-respaldos, /usr/local/bin/pawos-restaurar-nube, /usr/local/bin/pawos-backup-nube
+SUDOEOF2
+chmod 440 /etc/sudoers.d/pawos-respaldo
