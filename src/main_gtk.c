@@ -96,6 +96,137 @@ static gboolean pedir_entero_dialog(GtkWindow *padre, const char *titulo, const 
     return ok;
 }
 
+/* Ventana emergente con la lista completa de mascotas (ID, nombre,
+ * especie, estado) para elegir una sin tener que memorizar/adivinar el
+ * ID. Devuelve TRUE y llena id_out si se selecciona una fila y se
+ * confirma; FALSE si se cancela. */
+static gboolean seleccionar_mascota_dialog(GtkWindow *padre, int *id_out) {
+    enum { COL_SM_ID = 0, COL_SM_NOMBRE, COL_SM_ESPECIE, COL_SM_ESTADO, N_COL_SM };
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Buscar mascota", padre, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Seleccionar", GTK_RESPONSE_OK, NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dialogo), 420, 320);
+
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    gtk_container_set_border_width(GTK_CONTAINER(area), 10);
+
+    GtkListStore *store = gtk_list_store_new(N_COL_SM,
+        G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+
+    Mascota *ms = NULL;
+    int n = 0;
+    if (mascota_listar(&ms, &n) == 0) {
+        for (int i = 0; i < n; i++) {
+            GtkTreeIter iter;
+            gtk_list_store_append(store, &iter);
+            gtk_list_store_set(store, &iter,
+                COL_SM_ID, ms[i].id,
+                COL_SM_NOMBRE, ms[i].nombre,
+                COL_SM_ESPECIE, ms[i].especie,
+                COL_SM_ESTADO, ms[i].estado,
+                -1);
+        }
+        free(ms);
+    }
+
+    GtkWidget *treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+    g_object_unref(store);
+
+    GtkCellRenderer *r;
+    r = gtk_cell_renderer_text_new();
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(treeview), -1, "ID", r, "text", COL_SM_ID, NULL);
+    r = gtk_cell_renderer_text_new();
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(treeview), -1, "Nombre", r, "text", COL_SM_NOMBRE, NULL);
+    r = gtk_cell_renderer_text_new();
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(treeview), -1, "Especie", r, "text", COL_SM_ESPECIE, NULL);
+    r = gtk_cell_renderer_text_new();
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(treeview), -1, "Estado", r, "text", COL_SM_ESTADO, NULL);
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_container_add(GTK_CONTAINER(scroll), treeview);
+    gtk_box_pack_start(GTK_BOX(area), scroll, TRUE, TRUE, 0);
+
+    gtk_widget_show_all(dialogo);
+
+    gboolean ok = FALSE;
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        GtkTreeSelection *sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(treeview));
+        GtkTreeModel *modelo;
+        GtkTreeIter iter;
+        if (gtk_tree_selection_get_selected(sel, &modelo, &iter)) {
+            gtk_tree_model_get(modelo, &iter, COL_SM_ID, id_out, -1);
+            ok = TRUE;
+        }
+    }
+    gtk_widget_destroy(dialogo);
+    return ok;
+}
+
+static void on_buscar_mascota_id_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    GtkWidget *entrada = GTK_WIDGET(datos);
+    GtkWidget *toplevel = gtk_widget_get_toplevel(entrada);
+    if (!GTK_IS_WINDOW(toplevel)) return;
+
+    int id;
+    if (seleccionar_mascota_dialog(GTK_WINDOW(toplevel), &id)) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d", id);
+        gtk_entry_set_text(GTK_ENTRY(entrada), buf);
+    }
+}
+
+/* Igual que pedir_entero_dialog(), pero pensado para elegir el ID de
+ * una mascota: junto al campo de texto (por si ya se sabe el ID de
+ * memoria) hay un boton "Buscar mascota..." que abre la lista completa
+ * (seleccionar_mascota_dialog) para elegirla sin tener que adivinar el
+ * numero. Se usa en "Registrar vacuna" y "Registrar adopcion". */
+static gboolean pedir_mascota_id_dialog(GtkWindow *padre, const char *titulo, const char *etiqueta, int *out) {
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        titulo, padre, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Aceptar", GTK_RESPONSE_OK, NULL);
+
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 12);
+
+    GtkWidget *etiqueta_w = gtk_label_new(etiqueta);
+    gtk_widget_set_halign(etiqueta_w, GTK_ALIGN_START);
+
+    GtkWidget *fila = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *entrada = gtk_entry_new();
+    gtk_entry_set_input_purpose(GTK_ENTRY(entrada), GTK_INPUT_PURPOSE_DIGITS);
+    gtk_entry_set_activates_default(GTK_ENTRY(entrada), TRUE);
+    gtk_widget_set_hexpand(entrada, TRUE);
+    GtkWidget *btn_buscar = gtk_button_new_with_label("Buscar mascota...");
+    g_signal_connect(btn_buscar, "clicked", G_CALLBACK(on_buscar_mascota_id_clicked), entrada);
+
+    gtk_box_pack_start(GTK_BOX(fila), entrada, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(fila), btn_buscar, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(caja), etiqueta_w, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(caja), fila, FALSE, FALSE, 0);
+    gtk_container_add(GTK_CONTAINER(area), caja);
+
+    gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_OK);
+    gtk_widget_show_all(dialogo);
+
+    gboolean ok = FALSE;
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        const char *texto = gtk_entry_get_text(GTK_ENTRY(entrada));
+        if (texto && texto[0] != '\0') {
+            *out = atoi(texto);
+            ok = TRUE;
+        }
+    }
+    gtk_widget_destroy(dialogo);
+    return ok;
+}
+
 /* Libera un bloque de contexto asignado con g_malloc/g_malloc0 cuando
  * su ventana se destruye. Se reutiliza para todos los modulos nuevos. */
 static void liberar_contexto(GtkWidget *widget, gpointer datos) {
@@ -569,7 +700,7 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     ContextoVacunas *ctx = (ContextoVacunas *)datos;
 
     int mascota_id;
-    if (!pedir_entero_dialog(GTK_WINDOW(ctx->ventana), "Registrar vacuna", "ID de la mascota:", &mascota_id))
+    if (!pedir_mascota_id_dialog(GTK_WINDOW(ctx->ventana), "Registrar vacuna", "ID de la mascota:", &mascota_id))
         return;
 
     Mascota m;
@@ -749,7 +880,7 @@ static void on_registrar_adopcion_clicked(GtkButton *boton, gpointer datos) {
     ContextoAdopciones *ctx = (ContextoAdopciones *)datos;
 
     int mascota_id;
-    if (!pedir_entero_dialog(GTK_WINDOW(ctx->ventana), "Registrar adopcion", "ID de la mascota a adoptar:", &mascota_id))
+    if (!pedir_mascota_id_dialog(GTK_WINDOW(ctx->ventana), "Registrar adopcion", "ID de la mascota a adoptar:", &mascota_id))
         return;
 
     Mascota m;
@@ -1514,14 +1645,33 @@ static void abrir_pantalla_memoria(GtkWidget *padre) {
  * ================================================================= */
 
 typedef struct {
-    GtkWidget *ventana;
-    GtkWidget *lbl_ultimo;
-    GtkWidget *lbl_estado;
-    GtkWidget *lbl_modo;
-    GtkWidget *radio_auto;
-    GtkWidget *radio_manual;
-    GtkWidget *combo_intervalo;
-    Rol        rol;
+    GtkWidget    *ventana;
+    GtkWidget    *lbl_ultimo;
+    GtkWidget    *lbl_estado;
+    GtkWidget    *lbl_modo;
+    GtkWidget    *radio_auto;
+    GtkWidget    *radio_manual;
+    GtkWidget    *combo_intervalo;
+    GtkWidget    *lista_historial;
+    GtkListStore *modelo_historial;
+    GtkWidget    *btn_restaurar;
+    GtkWidget    *btn_actualizar;
+    GtkWidget    *entrada_etiqueta_auto; /* etiqueta por defecto: se usa
+                                           * si "Respaldar ahora" se deja
+                                           * en blanco, y en el respaldo
+                                           * automatico (que no tiene
+                                           * forma de pedir una a nadie) */
+    gboolean      cargando_historial; /* evita apilar varias cargas si se
+                                        * presiona "Actualizar estado" muy
+                                        * seguido mientras una ya esta en
+                                        * curso */
+    gboolean     *vivo; /* TRUE mientras la ventana existe; los hilos en
+                          * segundo plano la revisan antes de tocar el
+                          * contexto, por si la ventana se cierra mientras
+                          * una operacion de red (listar/restaurar) sigue
+                          * en curso. Nunca se libera (una gboolean suelta
+                          * por apertura de esta pantalla, a proposito). */
+    Rol           rol;
 } ContextoRespaldo;
 
 /* Los valores del combo de intervalo, en horas: 1 dia, 3 dias,
@@ -1532,6 +1682,21 @@ static const char *INTERVALOS_ETIQUETA[] = {
     "Cada 1 dia", "Cada 3 dias", "Cada 1 semana", "Cada 1 mes"
 };
 #define N_INTERVALOS 4
+
+/* Columnas del historial de respaldos (lo que 'pawos-listar-respaldos'
+ * reporta que hay guardado en Google Drive). COL_HIST_ARCHIVO no se
+ * muestra en la tabla, pero se guarda en el modelo para saber
+ * exactamente que archivo pedir de vuelta al restaurar. COL_HIST_FECHA
+ * ya viene en hora local (no UTC) desde el script. COL_HIST_ETIQUETA es
+ * el nombre opcional que se le puso al respaldo con "Respaldar ahora"
+ * (vacio en los respaldos automaticos, que nunca llevan etiqueta). */
+enum {
+    COL_HIST_FECHA = 0,
+    COL_HIST_TAMANO,
+    COL_HIST_ARCHIVO,
+    COL_HIST_ETIQUETA,
+    N_COL_HIST
+};
 
 /* Ejecuta 'comando', lee la primera linea de su salida en 'out' (sin
  * salto de linea) y la deja vacia si algo fallo. */
@@ -1600,6 +1765,115 @@ static void actualizar_ui_modo_respaldo(ContextoRespaldo *ctx) {
     snprintf(buf, sizeof(buf), "Modo actual: %s",
              es_manual ? "Manual" : INTERVALOS_ETIQUETA[indice]);
     gtk_label_set_text(GTK_LABEL(ctx->lbl_modo), buf);
+
+    char etiqueta_guardada[64];
+    leer_salida_comando("cat /var/pawos/backup_etiqueta_auto.txt 2>/dev/null",
+        etiqueta_guardada, sizeof(etiqueta_guardada));
+    gtk_entry_set_text(GTK_ENTRY(ctx->entrada_etiqueta_auto), etiqueta_guardada);
+}
+
+/* Lee el registro de respaldos que ya existen en Google Drive (lo que
+ * imprime 'pawos-listar-respaldos': una linea por archivo, con
+ * TABULADOR entre columnas -"<fecha hora local>\t<tamano>\t<archivo>\t<etiqueta>"-,
+ * no espacios, porque la fecha misma trae un espacio adentro) y llena
+ * la tabla del historial con eso. Si el comando falla (por ejemplo,
+ * porque todavia no existe el permiso sudo o rclone no esta
+ * configurado), la tabla simplemente queda vacia.
+ *
+ * Importante: la fecha que se muestra es la de modificacion en Drive,
+ * ya convertida a la hora local de esta maquina, no algo derivado del
+ * nombre del archivo - dos respaldos distintos pueden mostrar la misma
+ * fecha aqui. Por eso ARCHIVO siempre se guarda aparte (columna oculta)
+ * y es lo unico que se usa para restaurar; nunca hay que reconstruir el
+ * nombre a mano a partir
+ * de lo que se ve en la columna de fecha.
+ *
+ * Esto habla con Google Drive (via 'pawos-listar-respaldos'), asi que
+ * puede tardar unos segundos. Corre en un hilo aparte (g_thread_new)
+ * para no congelar la ventana mientras espera - si esto corriera en el
+ * hilo principal de GTK, el gestor de ventanas termina mostrando
+ * "no responde" cada vez que la red tarda. El resultado se aplica de
+ * vuelta a la UI con g_idle_add, que si corre en el hilo principal
+ * (es la unica forma segura de tocar widgets de GTK desde otro hilo). */
+typedef struct {
+    ContextoRespaldo *ctx;
+    gboolean         *vivo;
+    GPtrArray        *lineas; /* char* strdup'd, una por respaldo */
+} TareaHistorial;
+
+static gboolean aplicar_historial_ui(gpointer datos) {
+    TareaHistorial *t = (TareaHistorial *)datos;
+
+    if (*t->vivo) {
+        ContextoRespaldo *ctx = t->ctx;
+        gtk_list_store_clear(ctx->modelo_historial);
+
+        for (guint i = 0; i < t->lineas->len; i++) {
+            char *linea = (char *)g_ptr_array_index(t->lineas, i);
+
+            char *fecha = linea;
+            char *tab1 = strchr(linea, '\t');
+            if (!tab1) continue;
+            *tab1 = '\0';
+            char *tamano = tab1 + 1;
+            char *tab2 = strchr(tamano, '\t');
+            if (!tab2) continue;
+            *tab2 = '\0';
+            char *archivo = tab2 + 1;
+            char *tab3 = strchr(archivo, '\t');
+            char *etiqueta = "";
+            if (tab3) {
+                *tab3 = '\0';
+                etiqueta = tab3 + 1;
+            }
+            if (archivo[0] == '\0') continue;
+
+            GtkTreeIter iter;
+            gtk_list_store_append(ctx->modelo_historial, &iter);
+            gtk_list_store_set(ctx->modelo_historial, &iter,
+                COL_HIST_FECHA, fecha,
+                COL_HIST_TAMANO, tamano,
+                COL_HIST_ARCHIVO, archivo,
+                COL_HIST_ETIQUETA, etiqueta,
+                -1);
+        }
+        ctx->cargando_historial = FALSE;
+        if (ctx->btn_actualizar) gtk_widget_set_sensitive(ctx->btn_actualizar, TRUE);
+    }
+
+    g_ptr_array_free(t->lineas, TRUE);
+    g_free(t);
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer hilo_listar_respaldos(gpointer datos) {
+    TareaHistorial *t = (TareaHistorial *)datos;
+
+    FILE *p = popen("sudo -n /usr/local/bin/pawos-listar-respaldos 2>/dev/null", "r");
+    if (p) {
+        char linea[256];
+        while (fgets(linea, sizeof(linea), p) != NULL) {
+            size_t len = strlen(linea);
+            while (len > 0 && (linea[len - 1] == '\n' || linea[len - 1] == '\r')) linea[--len] = '\0';
+            if (len > 0) g_ptr_array_add(t->lineas, g_strdup(linea));
+        }
+        pclose(p);
+    }
+
+    g_idle_add(aplicar_historial_ui, t);
+    return NULL;
+}
+
+static void cargar_historial_respaldos(ContextoRespaldo *ctx) {
+    if (ctx->cargando_historial) return; /* ya hay una carga en curso */
+    ctx->cargando_historial = TRUE;
+    if (ctx->btn_actualizar) gtk_widget_set_sensitive(ctx->btn_actualizar, FALSE);
+
+    TareaHistorial *t = g_new0(TareaHistorial, 1);
+    t->ctx = ctx;
+    t->vivo = ctx->vivo;
+    t->lineas = g_ptr_array_new_with_free_func(g_free);
+    g_thread_new("pawos-listar-respaldos", hilo_listar_respaldos, t);
 }
 
 static void on_radio_modo_respaldo_toggled(GtkToggleButton *boton, gpointer datos) {
@@ -1630,6 +1904,19 @@ static void on_guardar_config_respaldo_clicked(GtkButton *boton, gpointer datos)
     }
 
     int rc = system(comando);
+
+    /* Etiqueta por defecto: se escribe directo (sin sudo) porque
+     * /var/pawos es escribible por el grupo "pawos-refugio", al que
+     * pertenece admin_refugio (ver instalar-pawos.sh, seccion 6). Un
+     * archivo vacio equivale a "sin etiqueta por defecto" -
+     * pawos-backup-nube ya maneja ese caso. */
+    const char *etiqueta_auto = gtk_entry_get_text(GTK_ENTRY(ctx->entrada_etiqueta_auto));
+    FILE *fp = fopen("/var/pawos/backup_etiqueta_auto.txt", "w");
+    if (fp) {
+        fprintf(fp, "%s\n", etiqueta_auto);
+        fclose(fp);
+    }
+
     if (rc == 0) {
         mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Configuracion de respaldo guardada.", FALSE);
     } else {
@@ -1644,10 +1931,65 @@ static void on_guardar_config_respaldo_clicked(GtkButton *boton, gpointer datos)
 
 static void on_actualizar_estado_respaldo_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
-    actualizar_estado_respaldo((ContextoRespaldo *)datos);
+    ContextoRespaldo *ctx = (ContextoRespaldo *)datos;
+    actualizar_estado_respaldo(ctx);
+    cargar_historial_respaldos(ctx);
 }
 
-static void on_respaldar_ahora_clicked(GtkButton *boton, gpointer datos) {
+/* Igual que el historial: restaurar habla con Google Drive (descarga el
+ * archivo elegido), asi que puede tardar. Corre en un hilo aparte para
+ * no congelar la ventana - de lo contrario el gestor de ventanas la
+ * marca como "no responde" mientras dura la descarga. */
+typedef struct {
+    ContextoRespaldo *ctx;
+    gboolean         *vivo;
+    char             *archivo;
+    int               rc; /* resultado de system(), llenado por el hilo */
+} TareaRestaurar;
+
+static gboolean aplicar_restaurar_ui(gpointer datos) {
+    TareaRestaurar *t = (TareaRestaurar *)datos;
+
+    if (*t->vivo) {
+        ContextoRespaldo *ctx = t->ctx;
+        gtk_widget_set_sensitive(ctx->btn_restaurar, TRUE);
+
+        if (t->rc == 0) {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana),
+                "Base de datos restaurada desde el respaldo seleccionado.\n"
+                "Cierra y vuelve a abrir PawOS para ver los datos restaurados.", FALSE);
+        } else {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana),
+                "No se pudo restaurar.\n"
+                "Verifica el permiso sudo (NOPASSWD) para\n"
+                "'pawos-restaurar-nube' (ver README.md).", TRUE);
+        }
+        cargar_historial_respaldos(ctx);
+    }
+
+    g_free(t->archivo);
+    g_free(t);
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer hilo_restaurar_respaldo(gpointer datos) {
+    TareaRestaurar *t = (TareaRestaurar *)datos;
+
+    char comando[220];
+    snprintf(comando, sizeof(comando), "sudo -n /usr/local/bin/pawos-restaurar-nube '%s'", t->archivo);
+    t->rc = system(comando);
+
+    g_idle_add(aplicar_restaurar_ui, t);
+    return NULL;
+}
+
+/* Restaurar un respaldo pisa la base de datos actual, asi que: exige rol
+ * Administrador, exige que haya algo seleccionado en la tabla del
+ * historial, y pide confirmacion explicita antes de ejecutar nada. El
+ * script 'pawos-restaurar-nube' (ver instalar-pawos.sh) ya se encarga
+ * de guardar una copia de seguridad de la base de datos actual antes de
+ * sobreescribirla, como red de seguridad adicional. */
+static void on_restaurar_respaldo_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     ContextoRespaldo *ctx = (ContextoRespaldo *)datos;
 
@@ -1656,44 +1998,198 @@ static void on_respaldar_ahora_clicked(GtkButton *boton, gpointer datos) {
         return;
     }
 
-    /* "sudo -n" para no quedarse esperando una contraseña que la GUI no
-     * puede pedir; requiere la regla NOPASSWD de /etc/sudoers.d
-     * (ver README.md, seccion de Respaldo en la Nube).
-     *
-     * "--no-block": systemctl start, por defecto, ESPERA a que el
-     * servicio termine de correr (rclone incluido) antes de devolver
-     * el control - eso congelaba la ventana 20-30 segundos si rclone
-     * tardaba (por ejemplo, si "rclone config" no esta hecho todavia).
-     * Con --no-block, systemctl solo encola la tarea y regresa de
-     * inmediato; el resultado real se ve despues con
-     * "Actualizar estado". */
-    int rc = system("sudo -n systemctl --no-block start pawos-backup.service");
-
-    if (rc == 0) {
+    GtkTreeSelection *sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(ctx->lista_historial));
+    GtkTreeModel *modelo;
+    GtkTreeIter iter;
+    if (!gtk_tree_selection_get_selected(sel, &modelo, &iter)) {
         mostrar_mensaje(GTK_WINDOW(ctx->ventana),
-            "Respaldo iniciado. Puede tardar unos segundos en\n"
-            "completarse; dale a 'Actualizar estado' para ver el resultado.", FALSE);
-    } else {
-        mostrar_mensaje(GTK_WINDOW(ctx->ventana),
-            "No se pudo iniciar el respaldo manualmente.\n"
-            "Verifica el permiso sudo (NOPASSWD) para\n"
-            "'systemctl start pawos-backup.service' (ver README.md).", TRUE);
+            "Selecciona un respaldo de la tabla de historial antes de restaurar.", TRUE);
+        return;
     }
-    actualizar_estado_respaldo(ctx);
+
+    gchar *archivo = NULL;
+    gchar *fecha = NULL;
+    gtk_tree_model_get(modelo, &iter, COL_HIST_ARCHIVO, &archivo, COL_HIST_FECHA, &fecha, -1);
+
+    GtkWidget *confirmar = gtk_message_dialog_new(GTK_WINDOW(ctx->ventana),
+        GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING, GTK_BUTTONS_YES_NO,
+        "Esto va a REEMPLAZAR la base de datos actual con el respaldo del\n%s (%s).\n\n"
+        "Se guarda una copia de la base de datos actual antes de sobreescribir,\n"
+        "por si acaso. ¿Continuar?",
+        fecha ? fecha : "?", archivo ? archivo : "?");
+    int respuesta = gtk_dialog_run(GTK_DIALOG(confirmar));
+    gtk_widget_destroy(confirmar);
+
+    if (respuesta != GTK_RESPONSE_YES || !archivo) {
+        g_free(archivo);
+        g_free(fecha);
+        return;
+    }
+    g_free(fecha);
+
+    gtk_widget_set_sensitive(ctx->btn_restaurar, FALSE);
+
+    TareaRestaurar *t = g_new0(TareaRestaurar, 1);
+    t->ctx = ctx;
+    t->vivo = ctx->vivo;
+    t->archivo = g_strdup(archivo);
+    g_free(archivo);
+    g_thread_new("pawos-restaurar-nube", hilo_restaurar_respaldo, t);
+}
+
+/* "Respaldar ahora" tambien habla con Google Drive (sube el archivo),
+ * asi que corre en un hilo aparte por la misma razon que listar y
+ * restaurar: para no congelar la ventana (y que el gestor de ventanas
+ * no la marque como "no responde") mientras dura la subida.
+ *
+ * Antes esto se disparaba con "systemctl --no-block start
+ * pawos-backup.service" (encola la tarea y regresa al instante, sin
+ * esperar el resultado real). Ahora que ya existe el hilo en segundo
+ * plano, se llama directo a pawos-backup-nube (via sudo -n, agregado a
+ * sudoers) en ese hilo: espera el resultado real sin bloquear la GUI, y
+ * de paso permite mandarle la etiqueta opcional que haya escrito el
+ * usuario. */
+typedef struct {
+    ContextoRespaldo *ctx;
+    gboolean         *vivo;
+    char             *etiqueta;
+    GtkWidget        *boton;
+    int               rc;
+} TareaRespaldar;
+
+static gboolean aplicar_respaldar_ui(gpointer datos) {
+    TareaRespaldar *t = (TareaRespaldar *)datos;
+
+    if (*t->vivo) {
+        ContextoRespaldo *ctx = t->ctx;
+        gtk_widget_set_sensitive(t->boton, TRUE);
+
+        if (t->rc == 0) {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Respaldo completado.", FALSE);
+        } else {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana),
+                "No se pudo completar el respaldo.\n"
+                "Verifica el permiso sudo (NOPASSWD) para\n"
+                "'pawos-backup-nube' (ver README.md).", TRUE);
+        }
+        actualizar_estado_respaldo(ctx);
+        cargar_historial_respaldos(ctx);
+    }
+
+    g_free(t->etiqueta);
+    g_free(t);
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer hilo_respaldar_ahora(gpointer datos) {
+    TareaRespaldar *t = (TareaRespaldar *)datos;
+
+    char comando[300];
+    snprintf(comando, sizeof(comando), "sudo -n /usr/local/bin/pawos-backup-nube '%s'", t->etiqueta);
+    t->rc = system(comando);
+
+    g_idle_add(aplicar_respaldar_ui, t);
+    return NULL;
+}
+
+static void on_respaldar_ahora_clicked(GtkButton *boton, gpointer datos) {
+    ContextoRespaldo *ctx = (ContextoRespaldo *)datos;
+
+    if (ctx->rol != ROL_ADMIN) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Requiere rol Administrador.", TRUE);
+        return;
+    }
+
+    /* Etiqueta opcional, para poder reconocer este respaldo despues en
+     * la tabla de historial (por ejemplo "antes-de-prueba") en vez de
+     * solo por fecha. Se puede dejar vacio sin problema. */
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Respaldar ahora", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Respaldar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 12);
+
+    GtkWidget *lbl = gtk_label_new("Nombre/etiqueta para este respaldo (opcional):");
+    gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+    GtkWidget *entrada = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entrada), "ej. antes-de-prueba (deja vacio si no quieres una)");
+    gtk_entry_set_max_length(GTK_ENTRY(entrada), 40);
+    gtk_entry_set_activates_default(GTK_ENTRY(entrada), TRUE);
+    /* Precargada con la etiqueta por defecto guardada, si hay una - se
+     * puede borrar o cambiar aqui mismo, solo para este respaldo. */
+    gtk_entry_set_text(GTK_ENTRY(entrada), gtk_entry_get_text(GTK_ENTRY(ctx->entrada_etiqueta_auto)));
+
+    gtk_box_pack_start(GTK_BOX(caja), lbl, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(caja), entrada, FALSE, FALSE, 0);
+    gtk_container_add(GTK_CONTAINER(area), caja);
+
+    gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_OK);
+    gtk_widget_show_all(dialogo);
+
+    int respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+    char etiqueta_buf[64] = "";
+    if (respuesta == GTK_RESPONSE_OK) {
+        snprintf(etiqueta_buf, sizeof(etiqueta_buf), "%s", gtk_entry_get_text(GTK_ENTRY(entrada)));
+    }
+    gtk_widget_destroy(dialogo);
+    if (respuesta != GTK_RESPONSE_OK) return;
+
+    gtk_widget_set_sensitive(GTK_WIDGET(boton), FALSE);
+
+    TareaRespaldar *t = g_new0(TareaRespaldar, 1);
+    t->ctx = ctx;
+    t->vivo = ctx->vivo;
+    t->etiqueta = g_strdup(etiqueta_buf);
+    t->boton = GTK_WIDGET(boton);
+    g_thread_new("pawos-backup-nube", hilo_respaldar_ahora, t);
+}
+
+/* Como liberar_contexto(), pero ademas marca ctx->vivo en FALSE antes
+ * de liberar el contexto: los hilos en segundo plano (listar/restaurar/
+ * respaldar) revisan esa bandera antes de tocar cualquier widget, por
+ * si la ventana se cierra mientras una operacion de red sigue en
+ * curso. La bandera en si (un solo gboolean) nunca se libera a
+ * proposito, para que siga siendo valida aunque el hilo termine
+ * despues de que ctx ya no exista. */
+static void liberar_contexto_respaldo(GtkWidget *widget, gpointer datos) {
+    (void)widget;
+    ContextoRespaldo *ctx = (ContextoRespaldo *)datos;
+    if (ctx->vivo) *ctx->vivo = FALSE;
+    g_free(ctx);
 }
 
 static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
     ContextoRespaldo *ctx = g_malloc0(sizeof(ContextoRespaldo));
     ctx->rol = rol;
+    ctx->vivo = g_new(gboolean, 1);
+    *ctx->vivo = TRUE;
 
     ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Respaldo en la Nube");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 560, 480);
+    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 580, 700);
     gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
     gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 16);
 
+    /* caja_raiz separa el contenido (que puede crecer, por eso va
+     * dentro de un GtkScrolledWindow) de la fila de botones de abajo
+     * (Actualizar/Respaldar/Cerrar), que se queda siempre fija y
+     * visible sin importar cuanto contenido haya arriba o que tan
+     * chica quede la ventana. Antes todo iba en una sola caja sin
+     * scroll, y al agregar la etiqueta por defecto el contenido crecio
+     * lo suficiente para que los botones de abajo quedaran fuera del
+     * area visible en ventanas mas chicas. */
+    GtkWidget *caja_raiz = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja_raiz);
+
+    GtkWidget *scroll_principal = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_principal),
+        GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_box_pack_start(GTK_BOX(caja_raiz), scroll_principal, TRUE, TRUE, 0);
+
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+    gtk_container_add(GTK_CONTAINER(scroll_principal), caja);
 
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Respaldo en la Nube</span>");
@@ -1747,18 +2243,77 @@ static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
 
     gtk_box_pack_start(GTK_BOX(caja_config), ctx->radio_manual, FALSE, FALSE, 0);
 
+    GtkWidget *lbl_etiqueta_auto = gtk_label_new(
+        "Etiqueta por defecto (opcional, se usa si 'Respaldar ahora' se deja\n"
+        "en blanco, y tambien en el respaldo automatico):");
+    gtk_widget_set_halign(lbl_etiqueta_auto, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(lbl_etiqueta_auto, 6);
+    gtk_box_pack_start(GTK_BOX(caja_config), lbl_etiqueta_auto, FALSE, FALSE, 0);
+
+    ctx->entrada_etiqueta_auto = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(ctx->entrada_etiqueta_auto),
+        "ej. refugio-principal (deja vacio para no usar ninguna)");
+    gtk_entry_set_max_length(GTK_ENTRY(ctx->entrada_etiqueta_auto), 40);
+    gtk_box_pack_start(GTK_BOX(caja_config), ctx->entrada_etiqueta_auto, FALSE, FALSE, 0);
+
     GtkWidget *btn_guardar_config = gtk_button_new_with_label("Guardar configuracion");
     gtk_widget_set_halign(btn_guardar_config, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(caja_config), btn_guardar_config, FALSE, FALSE, 4);
 
     gtk_box_pack_start(GTK_BOX(caja), marco_config, FALSE, FALSE, 0);
 
+    /* --- Historial de respaldos: registro de lo que ya hay guardado en
+     * Google Drive, por si hay que recuperar la base de datos despues
+     * de un borrado accidental. --- */
+    GtkWidget *marco_historial = gtk_frame_new("Historial de respaldos (Google Drive)");
+    GtkWidget *caja_historial = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_container_set_border_width(GTK_CONTAINER(caja_historial), 10);
+    gtk_container_add(GTK_CONTAINER(marco_historial), caja_historial);
+
+    GtkWidget *lbl_historial = gtk_label_new(
+        "Cada respaldo queda guardado por separado (no se pisan entre si).\n"
+        "Al usar 'Respaldar ahora' puedes ponerle una etiqueta para reconocerlo\n"
+        "despues. Selecciona uno y usa 'Restaurar seleccionado' para recuperarlo.");
+    gtk_label_set_justify(GTK_LABEL(lbl_historial), GTK_JUSTIFY_LEFT);
+    gtk_widget_set_halign(lbl_historial, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja_historial), lbl_historial, FALSE, FALSE, 0);
+
+    ctx->modelo_historial = gtk_list_store_new(N_COL_HIST,
+        G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+    ctx->lista_historial = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->modelo_historial));
+
+    GtkCellRenderer *render_fecha = gtk_cell_renderer_text_new();
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(ctx->lista_historial), -1,
+        "Fecha del respaldo", render_fecha, "text", COL_HIST_FECHA, NULL);
+    GtkCellRenderer *render_etiqueta = gtk_cell_renderer_text_new();
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(ctx->lista_historial), -1,
+        "Etiqueta", render_etiqueta, "text", COL_HIST_ETIQUETA, NULL);
+    GtkCellRenderer *render_tamano = gtk_cell_renderer_text_new();
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(ctx->lista_historial), -1,
+        "Tamano (bytes)", render_tamano, "text", COL_HIST_TAMANO, NULL);
+
+    GtkWidget *scroll_historial = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_historial),
+        GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(scroll_historial, -1, 140);
+    gtk_container_add(GTK_CONTAINER(scroll_historial), ctx->lista_historial);
+    gtk_box_pack_start(GTK_BOX(caja_historial), scroll_historial, TRUE, TRUE, 0);
+
+    ctx->btn_restaurar = gtk_button_new_with_label("Restaurar seleccionado");
+    gtk_widget_set_halign(ctx->btn_restaurar, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja_historial), ctx->btn_restaurar, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(caja), marco_historial, TRUE, TRUE, 0);
+
+    /* Fuera del scroll a proposito (ver comentario en caja_raiz, arriba):
+     * estos botones siempre tienen que estar visibles. */
     GtkWidget *fila_botones = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_pack_start(GTK_BOX(caja), fila_botones, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(caja_raiz), fila_botones, FALSE, FALSE, 0);
 
     GtkWidget *btn_actualizar = gtk_button_new_with_label("Actualizar estado");
     GtkWidget *btn_respaldar  = gtk_button_new_with_label("Respaldar ahora");
     GtkWidget *btn_cerrar     = gtk_button_new_with_label("Cerrar");
+    ctx->btn_actualizar = btn_actualizar;
 
     gtk_box_pack_start(GTK_BOX(fila_botones), btn_actualizar, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(fila_botones), btn_respaldar, FALSE, FALSE, 0);
@@ -1772,19 +2327,24 @@ static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
         gtk_widget_set_sensitive(ctx->radio_auto, FALSE);
         gtk_widget_set_sensitive(ctx->radio_manual, FALSE);
         gtk_widget_set_sensitive(ctx->combo_intervalo, FALSE);
+        gtk_widget_set_sensitive(ctx->entrada_etiqueta_auto, FALSE);
         gtk_widget_set_sensitive(btn_guardar_config, FALSE);
         gtk_widget_set_tooltip_text(btn_guardar_config, "Requiere rol Administrador.");
+        gtk_widget_set_sensitive(ctx->btn_restaurar, FALSE);
+        gtk_widget_set_tooltip_text(ctx->btn_restaurar, "Requiere rol Administrador.");
     }
 
     g_signal_connect(btn_actualizar, "clicked", G_CALLBACK(on_actualizar_estado_respaldo_clicked), ctx);
     g_signal_connect(btn_respaldar, "clicked", G_CALLBACK(on_respaldar_ahora_clicked), ctx);
     g_signal_connect(ctx->radio_auto, "toggled", G_CALLBACK(on_radio_modo_respaldo_toggled), ctx);
     g_signal_connect(btn_guardar_config, "clicked", G_CALLBACK(on_guardar_config_respaldo_clicked), ctx);
+    g_signal_connect(ctx->btn_restaurar, "clicked", G_CALLBACK(on_restaurar_respaldo_clicked), ctx);
     g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto_respaldo), ctx);
 
     actualizar_estado_respaldo(ctx);
     actualizar_ui_modo_respaldo(ctx);
+    cargar_historial_respaldos(ctx);
     gtk_widget_show_all(ctx->ventana);
 }
 
@@ -2044,172 +2604,6 @@ static void abrir_pantalla_alertas(GtkWidget *padre, Rol rol) {
 }
 
 /* =================================================================
- * Modulo: Notas del Veterinario
- *
- * Comentarios libres sobre una mascota, aparte de las vacunas (ej.
- * "revisar cojera en pata trasera"). Mismo patron que Vacunas: todos
- * pueden ver, solo Admin/Veterinario pueden agregar.
- * ================================================================= */
-
-enum {
-    COL_NV_ID = 0,
-    COL_NV_MASCOTA,
-    COL_NV_NOTA,
-    COL_NV_AUTOR,
-    COL_NV_FECHA,
-    N_COL_NOTAS_VET
-};
-
-typedef struct {
-    GtkWidget    *ventana;
-    GtkWidget    *treeview;
-    GtkListStore *store;
-    Rol           rol;
-    const char   *usuario;
-} ContextoNotasVet;
-
-static void cargar_notas_veterinario(ContextoNotasVet *ctx) {
-    gtk_list_store_clear(ctx->store);
-
-    NotaVeterinario *ns;
-    int n;
-    if (nota_veterinario_listar(&ns, &n) != 0) {
-        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo leer la lista de notas.", TRUE);
-        return;
-    }
-
-    for (int i = 0; i < n; i++) {
-        GtkTreeIter iter;
-        gtk_list_store_append(ctx->store, &iter);
-        gtk_list_store_set(ctx->store, &iter,
-            COL_NV_ID, ns[i].id,
-            COL_NV_MASCOTA, ns[i].mascota_id,
-            COL_NV_NOTA, ns[i].nota,
-            COL_NV_AUTOR, ns[i].autor,
-            COL_NV_FECHA, ns[i].fecha,
-            -1);
-    }
-    free(ns);
-}
-
-static void on_agregar_nota_vet_clicked(GtkButton *boton, gpointer datos) {
-    (void)boton;
-    ContextoNotasVet *ctx = (ContextoNotasVet *)datos;
-
-    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
-        "Agregar nota del veterinario", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
-        "_Cancelar", GTK_RESPONSE_CANCEL,
-        "_Guardar", GTK_RESPONSE_OK, NULL);
-    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
-    GtkWidget *cuadricula = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(cuadricula), 8);
-    gtk_grid_set_column_spacing(GTK_GRID(cuadricula), 10);
-    gtk_container_set_border_width(GTK_CONTAINER(cuadricula), 12);
-
-    GtkWidget *e_mascota_id = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(e_mascota_id), "ID de la mascota");
-
-    GtkWidget *e_nota = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(e_nota), "Revisar cojera en pata trasera");
-
-    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("ID Mascota:"), 0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(cuadricula), e_mascota_id, 1, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nota:"), 0, 1, 1, 1);
-    gtk_grid_attach(GTK_GRID(cuadricula), e_nota, 1, 1, 1, 1);
-
-    gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
-
-    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
-        NotaVeterinario n;
-        memset(&n, 0, sizeof(n));
-        n.mascota_id = atoi(gtk_entry_get_text(GTK_ENTRY(e_mascota_id)));
-        snprintf(n.nota, sizeof(n.nota), "%s", gtk_entry_get_text(GTK_ENTRY(e_nota)));
-        snprintf(n.autor, sizeof(n.autor), "%s", ctx->usuario);
-
-        if (n.mascota_id <= 0 || strlen(n.nota) == 0) {
-            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "El ID de mascota y la nota son obligatorios.", TRUE);
-        } else if (nota_veterinario_agregar(&n) == 0) {
-            cargar_notas_veterinario(ctx);
-            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Nota agregada correctamente.", FALSE);
-        } else {
-            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Error al guardar la nota.", TRUE);
-        }
-    }
-    gtk_widget_destroy(dialogo);
-}
-
-static void abrir_pantalla_notas_veterinario(GtkWidget *padre, Rol rol, const char *usuario) {
-    ContextoNotasVet *ctx = g_malloc0(sizeof(ContextoNotasVet));
-    ctx->rol = rol;
-    ctx->usuario = usuario;
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Notas del Veterinario");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 700, 460);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
-
-    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
-
-    GtkWidget *titulo = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Notas del Veterinario</span>");
-    gtk_widget_set_halign(titulo, GTK_ALIGN_START);
-    gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
-
-    GtkWidget *subtitulo = gtk_label_new(
-        "Comentarios y observaciones sobre una mascota, aparte de las vacunas.");
-    gtk_widget_set_halign(subtitulo, GTK_ALIGN_START);
-    gtk_box_pack_start(GTK_BOX(caja), subtitulo, FALSE, FALSE, 0);
-
-    ctx->store = gtk_list_store_new(N_COL_NOTAS_VET,
-        G_TYPE_INT, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
-    ctx->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->store));
-    g_object_unref(ctx->store);
-
-    const char *encabezados[N_COL_NOTAS_VET] = {"ID", "ID Mascota", "Nota", "Autor", "Fecha"};
-    for (int i = 0; i < N_COL_NOTAS_VET; i++) {
-        GtkCellRenderer *render = gtk_cell_renderer_text_new();
-        GtkTreeViewColumn *col = gtk_tree_view_column_new_with_attributes(
-            encabezados[i], render, "text", i, NULL);
-        gtk_tree_view_column_set_resizable(col, TRUE);
-        gtk_tree_view_append_column(GTK_TREE_VIEW(ctx->treeview), col);
-    }
-
-    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtk_container_add(GTK_CONTAINER(scroll), ctx->treeview);
-    gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
-
-    GtkWidget *fila_botones = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_pack_start(GTK_BOX(caja), fila_botones, FALSE, FALSE, 0);
-
-    GtkWidget *btn_todas   = gtk_button_new_with_label("Ver todas");
-    GtkWidget *btn_agregar = gtk_button_new_with_label("Agregar nota");
-    GtkWidget *btn_cerrar  = gtk_button_new_with_label("Cerrar");
-
-    gtk_box_pack_start(GTK_BOX(fila_botones), btn_todas, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(fila_botones), btn_agregar, FALSE, FALSE, 0);
-    gtk_box_pack_end(GTK_BOX(fila_botones), btn_cerrar, FALSE, FALSE, 0);
-
-    /* Ver notas: todos los roles. Agregar: solo Admin y Veterinario,
-     * igual que Vacunas. */
-    if (rol == ROL_VOLUNTARIO) {
-        gtk_widget_set_sensitive(btn_agregar, FALSE);
-        gtk_widget_set_tooltip_text(btn_agregar, "Requiere rol Admin o Veterinario.");
-    }
-
-    g_signal_connect_swapped(btn_todas, "clicked", G_CALLBACK(cargar_notas_veterinario), ctx);
-    g_signal_connect(btn_agregar, "clicked", G_CALLBACK(on_agregar_nota_vet_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
-
-    cargar_notas_veterinario(ctx);
-    gtk_widget_show_all(ctx->ventana);
-}
-
-/* =================================================================
  * Ventana principal
  * ================================================================= */
 
@@ -2305,16 +2699,6 @@ static void on_alertas_clicked(GtkButton *boton, gpointer datos) {
     abrir_pantalla_alertas(d->ventana_principal, d->rol);
 }
 
-/* Notas del Veterinario: la ventana se abre para cualquier rol (leer las
- * notas es informacion util para todo el personal); "Agregar nota" queda
- * deshabilitado para Voluntario dentro de la propia ventana, igual que
- * en Vacunas. */
-static void on_notas_vet_clicked(GtkButton *boton, gpointer datos) {
-    (void)boton;
-    DatosBotonModulo *d = (DatosBotonModulo *)datos;
-    abrir_pantalla_notas_veterinario(d->ventana_principal, d->rol, d->usuario);
-}
-
 static void construir_ventana_principal(Rol rol, const char *usuario) {
     GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ventana), "PawOS Refugio");
@@ -2373,7 +2757,6 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "Administracion de Memoria",
         "Respaldo en la Nube",
         "Alertas de Sensores",
-        "Notas del Veterinario",
     };
     /* Icono (emoji) por modulo, solo cosmetico -- no afecta la logica. */
     const char *iconos_modulos[] = {
@@ -2386,7 +2769,6 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "\xF0\x9F\xA7\xA0", /* brain */
         "\xE2\x98\x81",     /* cloud */
         "\xF0\x9F\x9A\xA8", /* siren */
-        "\xF0\x9F\x93\x8B", /* clipboard */
     };
     /* Categoria por modulo (solo cosmetica, define el color del boton):
      * refugio = atencion directa al animal, gestion = administrativo,
@@ -2394,7 +2776,6 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     const char *categorias_modulos[] = {
         "cat-refugio", "cat-refugio", "cat-refugio", "cat-gestion",
         "cat-gestion", "cat-sistema", "cat-sistema", "cat-gestion", "cat-refugio",
-        "cat-refugio",
     };
     GCallback manejadores[] = {
         G_CALLBACK(on_mascotas_clicked),
@@ -2406,9 +2787,8 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         G_CALLBACK(on_memoria_clicked),
         G_CALLBACK(on_respaldo_clicked),
         G_CALLBACK(on_alertas_clicked),
-        G_CALLBACK(on_notas_vet_clicked),
     };
-    const int total_modulos = 10;
+    const int total_modulos = 9;
 
     DatosBotonModulo *datos_botones = g_malloc(sizeof(DatosBotonModulo));
     datos_botones->ventana_principal = ventana;

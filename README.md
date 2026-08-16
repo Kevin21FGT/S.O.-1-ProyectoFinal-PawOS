@@ -7,6 +7,7 @@ PawOS no es una distribución armada desde cero: es Debian 13 oficial, con un pr
 ## Índice
 
 - [De cero a un sistema operativo funcionando](#de-cero-a-un-sistema-operativo-funcionando)
+- [Requisitos del sistema y librerías](#requisitos-del-sistema-y-librerías)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Compilar desde el código fuente](#compilar-desde-el-código-fuente)
 - [Usuarios y roles](#usuarios-y-roles)
@@ -33,6 +34,50 @@ Esta sección resume, en orden, todo el camino desde el código fuente (C + Ensa
 **4. Empacar todo eso en una ISO booteable** es el trabajo de `live-build` (ver [Construir la ISO instalable](#construir-la-iso-instalable) y `live-iso/README_live_iso.md`): arma una imagen de Debian 13 desde cero, con los paquetes necesarios ya incluidos (`live-iso/package-lists/pawos.list.chroot`), y unos *hooks* (`live-iso/hooks/*.hook.chroot`) que corren automáticamente durante la construcción y hacen, dentro de esa imagen, básicamente lo mismo que `instalar-pawos.sh` (compilar, crear usuarios, servicios, permisos), más el branding visual (fondo de pantalla, logo, GRUB) y el instalador gráfico Calamares.
 
 **5. Booteando esa ISO** se obtiene un Debian en vivo con PawOS ya instalado y funcionando (sin tocar el disco todavía — es una demo/prueba). Para dejarlo instalado de forma permanente en una máquina o VM, se usa el ícono "Instalar PawOS" del escritorio (Calamares), que copia el sistema completo al disco duro. Ese sistema instalado ya es, en todo el sentido de la palabra, un sistema operativo: arranca solo, tiene sus propios usuarios y permisos, corre sus propios servicios en segundo plano, y sigue funcionando igual después de apagarlo y prenderlo de nuevo.
+
+## Requisitos del sistema y librerías
+
+### Hardware mínimo
+
+PawOS corre sobre Debian 13 + escritorio GNOME completo, así que hereda los requisitos de eso (GNOME es el componente más pesado, no PawOS en sí):
+
+| Recurso | Mínimo | Recomendado |
+|---|---|---|
+| Arquitectura | x86-64 (amd64) | x86-64 (amd64) |
+| RAM | 2 GB | 4 GB o más |
+| Disco (sistema ya instalado) | 10 GB | 20 GB o más |
+| Disco (solo para *armar* la ISO, aparte) | — | ~30 GB libres, ver [Construir la ISO instalable](#construir-la-iso-instalable) |
+
+### Paquetes del sistema operativo base (Debian 13)
+
+Estos son los paquetes de Debian que se instalan (ya sea con `instalar-pawos.sh` o dentro de la ISO vía `live-iso/package-lists/pawos.list.chroot`) para tener un sistema completo, más allá de PawOS mismo:
+
+| Paquete | Para qué es |
+|---|---|
+| `task-gnome-desktop` | El escritorio GNOME completo (solo en la ISO; sobre una Debian ya instalada se asume que ya existe un entorno gráfico) |
+| `network-manager` / `network-manager-applet` | Manejo de red (WiFi/Ethernet) con interfaz gráfica |
+| `sudo` | Permite a los usuarios de PawOS ejecutar comandos puntuales como root (apagar, reiniciar, instalar, respaldar) |
+| `git` | Control de versiones (para trabajar sobre el código fuente) |
+| `ufw` | Firewall (ver [Firewall](#seguridad--estado-actual)) |
+| `sqlite3` | Cliente de línea de comandos de SQLite (para inspeccionar `pawos.db` manualmente si hace falta) |
+| `calamares` / `calamares-settings-debian` | Instalador gráfico (solo en la ISO, para dejar PawOS instalado de forma permanente) |
+
+### Librerías para compilar y correr PawOS (nuestro programa)
+
+Estos son los paquetes que el propio código de PawOS necesita — para compilarlo (`-dev`) y, en tiempo de ejecución, la librería compartida correspondiente:
+
+| Paquete (compilación) | Para qué lo usa PawOS |
+|---|---|
+| `build-essential` | `gcc`, `make` y las herramientas básicas para compilar C |
+| `libncurses-dev` | Interfaz de texto del CLI (`pawos-refugio`): menús, formularios, colores en la terminal |
+| `libsqlite3-dev` | Base de datos (`db.c`) — mascotas, vacunas, adopciones, donantes, usuarios, alertas |
+| `libgtk-3-dev` | Interfaz gráfica del GUI (`pawos-refugio-gui`); trae consigo (como dependencias) GLib, Pango, Cairo, GdkPixbuf, AT-SPI/ATK, HarfBuzz — todo lo que GTK3 necesita para dibujar ventanas, texto y widgets |
+| `pkg-config` | Herramienta que le dice al compilador dónde están los headers y librerías de GTK3 (`pkg-config --cflags/--libs gtk+-3.0`) |
+| `nasm` | Ensamblador: compila `checksum.asm` a un objeto ELF64 (ver [De cero a un sistema operativo funcionando](#de-cero-a-un-sistema-operativo-funcionando)) |
+| `libcrypt-dev` | Hasheo de contraseñas con `crypt()` (SHA-512) — ver [Seguridad](#seguridad--estado-actual) |
+| `python3` | No lo usa el programa en C, pero sí los scripts `pawos-listar-respaldos`/`pawos-restaurar-nube` (ver [Respaldo en la nube](#respaldo-en-la-nube--estado-actual)), para filtrar el listado de respaldos de Google Drive de forma confiable. Normalmente ya viene con Debian + GNOME, pero `instalar-pawos.sh` lo pide explícitamente por si acaso. |
+
+En tiempo de ejecución, el `Makefile` enlaza cada binario con `-lncurses -lsqlite3 -lm -lcrypt` (CLI/demonio/monitor) o con las librerías de GTK3 que entrega `pkg-config` (GUI) — `-lm` es la librería matemática de C (siempre disponible con glibc, usada por ejemplo en los cálculos de porcentajes de CPU/memoria del servidor de monitoreo).
 
 ## Estructura del proyecto
 
@@ -103,7 +148,7 @@ PawOS crea tres usuarios reales de Linux, cada uno en un grupo distinto:
 **Importante — dos mecanismos de permisos conviven en el código:**
 
 - El **GUI** (`main_gtk.c`) usa `auth.c`, que mira el grupo real de Linux del usuario que inició sesión (`auth_rol_actual()`). Esto es "gestión de usuarios y permisos" a nivel del sistema operativo de verdad.
-- El **CLI** (`main.c`) usa `pantalla_login.c`, que pide usuario/contraseña **dentro del programa** y los compara contra la tabla `usuarios` de la base de datos (`usuario_autenticar()` en `db.c`).
+- El **CLI** (`main.c`) usa `pantalla_login.c`, que pide usuario/contraseña **dentro del programa** y la verifica contra la tabla `usuarios` de la base de datos (`usuario_autenticar()` en `db.c`) — la contraseña se guarda como *hash* (`crypt()`, SHA-512), nunca en texto plano; ver [Seguridad — estado actual](#seguridad--estado-actual) para el detalle completo.
 
 Es decir, el CLI tiene su propio login independiente del sistema operativo. Funciona, pero es importante saberlo porque significa que hay dos "bases de verdad" distintas para los roles (los grupos de Linux, y la tabla `usuarios`) — quedan sincronizadas manualmente (mismos tres usuarios en ambos lados), no automáticamente.
 
@@ -115,7 +160,7 @@ SQLite, un solo archivo (`/var/pawos/pawos.db` en la ISO, o `./pawos.db` en prue
 - **vacunas** — asociada a una mascota, nombre de la vacuna, fecha de aplicación, próxima fecha, observaciones.
 - **adopciones** — asociada a una mascota, datos del adoptante, fecha (al registrarla, marca la mascota como `adoptado`).
 - **donantes** — nombre, contacto, monto donado, fecha.
-- **usuarios** — username, password, rol (usada solo por el login del CLI).
+- **usuarios** — username, password (guardada como *hash* SHA-512 vía `crypt()`, no en texto plano), rol (usada solo por el login del CLI).
 - **alertas_sensores** — alertas que manda un sensor ESP32 externo (ver más abajo).
 - **notas_veterinario** — notas clínicas libres por mascota.
 
@@ -144,7 +189,7 @@ Organiza todo lo que el refugio guarda en carpetas por categoría dentro de `/va
 
 ### Servidor de monitoreo (`servidor_monitoreo.c`)
 
-Un servidor HTTP propio (sin frameworks, sockets directos) que corre en el puerto **8080** y expone un dashboard HTML con CPU, memoria, swap, espacio en disco, tiempo activo y procesos — leído directo de `/proc`. Requiere autenticación básica HTTP.
+Un servidor HTTP propio (sin frameworks, sockets directos) que corre en el puerto **8080** y expone un dashboard HTML con CPU, memoria, swap, espacio en disco, tiempo activo y procesos — leído directo de `/proc`. Requiere autenticación básica HTTP; la contraseña se verifica contra un *hash* (`crypt()`, SHA-512) guardado en el código, no contra el texto plano — ver [Seguridad — estado actual](#seguridad--estado-actual).
 
 También expone `POST /api/alerta`, un endpoint sin autenticación pensado para que un sensor **ESP32** externo (por ejemplo, un collar con sensores de temperatura o movimiento) reporte posibles señales de lesión o maltrato; cada alerta que llega se guarda en la tabla `alertas_sensores` y aparece en el módulo "Alertas de Sensores" del CLI/GUI.
 
@@ -271,6 +316,10 @@ Con Rufus (Windows): seleccionar el `.iso`, modo "DD Image" (no "ISO normal", pa
 
 Como el código se copia una sola vez a `config/includes.chroot/opt/pawos/` en el paso 3, si el repositorio se actualiza hay que repetir ese `cp` con el código nuevo y volver a correr `sudo lb build` (o `sudo lb clean && sudo lb build` para forzar que se vuelva a descargar todo desde cero) para que la ISO quede al día.
 
+**Importante: esto solo aplica a la ISO como archivo — no a un PawOS que ya está instalado.** La ISO es únicamente el medio de instalación inicial. Una vez que Calamares deja el sistema instalado en un disco (real o virtual), ese PawOS instalado es un Debian normal con los binarios en `/usr/local/bin`, sin ninguna relación directa con el `.iso` del que vino. Actualizarlo con una corrección de código funciona exactamente igual que en cualquier instalación hecha con `instalar-pawos.sh` (ver [Compilar desde el código fuente](#compilar-desde-el-código-fuente)): reemplazar los archivos fuente, `make clean && make all && make gui`, y copiar los binarios nuevos (o volver a correr `instalar-pawos.sh`). No hace falta rearmar la ISO ni reinstalar el sistema operativo completo.
+
+Rearmar la ISO (este proceso de `lb build`) solo hace falta cuando se necesita una imagen instalable *nueva y actualizada* — por ejemplo, para instalar PawOS desde cero en otra máquina, para el USB de entrega final, o para que quien instale desde la ISO reciba ya la última versión del código. Para seguir desarrollando y probando sobre un PawOS que ya está instalado y corriendo, ese paso se puede saltar por completo.
+
 ## Servicios del sistema (systemd)
 
 | Servicio | Qué hace | Se activa |
@@ -283,6 +332,23 @@ Como el código se copia una sola vez a `config/includes.chroot/opt/pawos/` en e
 ## Seguridad — estado actual
 
 Lo que está implementado: firewall configurado (ufw), permisos de sudo restringidos por usuario (solo apagar/reiniciar, excepto `admin_refugio` que también puede usar el instalador y el respaldo), verificación de integridad de la base de donantes por checksum, y **contraseñas hasheadas** (no en texto plano) tanto en el login del CLI como en el servidor de monitoreo.
+
+### Firewall (`ufw`)
+
+`instalar-pawos.sh` configura `ufw` (Uncomplicated Firewall, la interfaz simplificada de Debian sobre `netfilter`/`iptables`) con estas reglas, en este orden:
+
+```bash
+ufw default deny incoming    # por defecto, rechaza toda conexion entrante
+ufw default allow outgoing   # pero permite que PawOS mismo inicie conexiones salientes (ej. rclone)
+ufw allow from 192.168.0.0/16 to any port 8080 proto tcp   # dashboard: solo redes locales tipo 192.168.x.x
+ufw allow from 10.0.0.0/8    to any port 8080 proto tcp    # solo redes locales tipo 10.x.x.x
+ufw allow from 172.16.0.0/12 to any port 8080 proto tcp    # solo redes locales tipo 172.16-31.x.x
+ufw --force enable
+```
+
+La idea: por defecto Linux no bloquea nada, así que sin firewall cualquier persona en cualquier red podría llegar al puerto 8080 (el dashboard de monitoreo) o a cualquier otro puerto que termine abierto. Con estas reglas, **todo** el tráfico entrante se rechaza excepto el puerto 8080, y ese puerto **solo** responde a las tres redes privadas típicas de una LAN doméstica/institucional (`192.168.x.x`, `10.x.x.x`, `172.16.0.0`–`172.31.255.255`) — nunca desde una IP pública de Internet. El tráfico saliente se deja libre porque PawOS necesita poder conectarse afuera (por ejemplo, para subir el respaldo a Google Drive con `rclone`).
+
+En la ISO, el hook `0100-pawos-instalar.hook.chroot` deja las reglas ya escritas y el servicio `ufw` habilitado, pero no ejecuta `ufw enable` dentro del chroot (manipular `netfilter` sin un kernel real corriendo ahí no es confiable); las reglas quedan activas solas en el primer arranque real de la ISO ya instalada.
 
 ### Cómo funciona el hasheo de contraseñas
 
@@ -302,7 +368,7 @@ Esto requiere la librería `libcrypt` (paquete `libcrypt-dev` para compilar, ya 
 
 ### Cómo funciona por debajo
 
-El script `/usr/local/bin/pawos-backup-nube` (instalado por `instalar-pawos.sh`) hace el trabajo real: copia `/var/pawos/pawos.db` a Google Drive con `rclone copyto` (nombrando el archivo con fecha y hora, `pawos_AAAAMMDD_HHMMSS.db`, para no pisar respaldos anteriores) y sincroniza la carpeta `/var/pawos/archivos/backups` con `rclone copy`. Usa un remote de `rclone` llamado `ggdrive`, que apunta a una cuenta real de Google Drive.
+El script `/usr/local/bin/pawos-backup-nube` (instalado por `instalar-pawos.sh`) hace el trabajo real: copia `/var/pawos/pawos.db` a Google Drive con `rclone copyto` (nombrando el archivo con fecha, hora y milisegundos, `pawos_AAAAMMDD_HHMMSS_mmm.db`, para no pisar respaldos anteriores) y sincroniza la carpeta `/var/pawos/archivos/backups` con `rclone copy`. Usa un remote de `rclone` llamado `ggdrive`, que apunta a una cuenta real de Google Drive.
 
 Ese script lo ejecuta el servicio systemd `pawos-backup.service` (`Type=oneshot`, corre una vez y termina), disparado por el timer `pawos-backup.timer`. El servicio corre como **root**, así que la configuración de `rclone` que usa es la de la cuenta root (`/root/.config/rclone/rclone.conf`), no la del usuario que inició sesión gráficamente — importante tenerlo en cuenta si algún día hay que reconfigurar la cuenta de Drive:
 
@@ -312,9 +378,28 @@ sudo rclone config    # crear/editar el remote "ggdrive"
 
 Confirmado funcionando en la práctica: cada corrida sube el archivo y termina en pocos segundos (`sudo journalctl -u pawos-backup.service` para ver el historial completo, con hora exacta de cada respaldo).
 
+Como cada respaldo se sube con su propio nombre (`pawos_AAAAMMDD_HHMMSS_mmm.db`) en vez de sobreescribir siempre el mismo archivo, Google Drive termina acumulando un historial completo de versiones de la base de datos — esto es justamente lo que hace posible recuperarse de un borrado accidental: si `/var/pawos/pawos.db` se borra o se corrompe por error, no se pierde nada, porque siempre queda al menos el respaldo de la corrida anterior (automática o manual) esperando en la nube.
+
+### Recuperarse de un borrado accidental de la base de datos
+
+Dos scripts nuevos, instalados también por `instalar-pawos.sh`, hacen esto posible. Ambos usan `rclone lsjson` (sin ningún filtro propio de `rclone` como `--include` o `--files-only` — ver nota más abajo del porqué) y filtran/ordenan el resultado con un script corto de Python, en vez de depender de esos filtros:
+
+- **`/usr/local/bin/pawos-listar-respaldos`** — le pregunta a Google Drive qué respaldos existen (fecha de modificación, tamaño y nombre de cada uno) y los ordena del más reciente al más antiguo. Es de solo lectura, no modifica nada.
+- **`/usr/local/bin/pawos-restaurar-nube <archivo>`** — antes de tocar nada, guarda una copia de la base de datos *actual* como `/var/pawos/pawos.db.antes-de-restaurar.<fecha>` (nunca se borra sola, queda ahí por si el restore fue un error), busca en Drive el **ID único** del archivo elegido (no lo pide por nombre — ver nota abajo) y lo descarga a un archivo temporal con `rclone backend copyid`; solo si eso termina bien, lo mueve (`mv`) para reemplazar `/var/pawos/pawos.db`. Valida que el nombre de archivo tenga el formato esperado (`pawos_*.db`) antes de hacer nada, para no aceptar cualquier cosa como argumento.
+
+Ambos aparecen integrados en la pantalla "Respaldo en la Nube" del GUI, en el bloque "Historial de respaldos" descrito abajo. **Importante:** la columna de fecha de esa tabla muestra la fecha de *modificación en Drive*, convertida a la hora local de la máquina (Drive la entrega en UTC; `pawos-listar-respaldos` hace la conversión con `datetime.astimezone()` de Python antes de imprimirla) — no es algo derivado del nombre del archivo. Dos respaldos distintos pueden mostrar la misma fecha ahí (pasó en la práctica: dos archivos con nombres distintos, subidos segundos aparte, quedaron con el mismo `ModTime` registrado por Drive). Por eso el nombre real de archivo nunca se debe reconstruir a mano a partir de la fecha visible; hay que usar siempre el que trae la fila seleccionada (o la salida de `pawos-listar-respaldos`).
+
+Para poder reconocer un respaldo sin depender solo de la fecha, "Respaldar ahora" (ver más abajo) permite ponerle una **etiqueta** opcional (por ejemplo `antes-de-prueba`), que queda como parte del nombre del archivo (`pawos_AAAAMMDD_HHMMSS_mmm_antes-de-prueba.db`) y aparece en su propia columna en la tabla de historial.
+
+También existe una **etiqueta por defecto** (campo "Etiqueta por defecto" en "Configuración del respaldo", guardada en `/var/pawos/backup_etiqueta_auto.txt`) que se usa automáticamente cuando no se escribe una explícita — esto cubre tanto "Respaldar ahora" dejado en blanco como el **respaldo automático del timer diario**, que corre sin nadie presente y no tiene forma de pedir una etiqueta en el momento. `pawos-backup-nube` revisa ese archivo cada vez que corre sin argumento.
+
+> **Nota — por qué se restaura por ID y no por nombre:** a diferencia de un sistema de archivos normal, Google Drive permite que existan dos objetos con el nombre *idéntico* en la misma carpeta (no hay ninguna restricción de unicidad por nombre). Pedir un archivo por nombre con `rclone copyto` puede entonces no resolver a cuál se refiere, y fallar con `Source doesn't exist or is a directory and destination is a file`. La solución fue resolver primero el **ID** interno de Drive del archivo elegido y restaurar por ese ID (`rclone backend copyid`), que sí identifica un objeto exacto sin ambigüedad. El cambio a nombres con milisegundos (arriba) además reduce que dos respaldos terminen con el nombre exactamente igual.
+>
+> **Nota 2 — por qué no se usan los filtros `--include`/`--files-only` de `rclone`:** las primeras versiones de estos scripts sí los usaban, pero en pruebas reales resultaron poco confiables en este entorno: un `--include` por nombre exacto dejó pasar `archivos_backups` (la carpeta donde se sincronizan los respaldos de archivos, que vive en la misma carpeta de Drive) aunque su nombre no coincidiera — y `rclone backend copyid` rechazó ese ID con `can't copy directory`, porque apuntaba a una carpeta, no a la base de datos. Combinando `--include` con `--files-only`, en cambio, el listado no devolvía ningún resultado aunque los archivos sí existieran. La versión actual evita ambos flags: trae siempre la lista completa sin filtrar (`rclone lsjson`) y filtra en Python comparando el nombre exacto y descartando `IsDir: true`, que se comportó de forma consistente en todas las pruebas.
+
 ### Pantalla "Respaldo en la Nube" del GUI (`abrir_pantalla_respaldo` en `main_gtk.c`)
 
-Accesible para cualquier rol, pero solo **admin_refugio** puede tocar los controles (el resto los ve deshabilitados con un tooltip "Requiere rol Administrador" — mismo patrón que las pantallas de Procesos y Memoria). Tiene tres secciones:
+Accesible para cualquier rol, pero solo **admin_refugio** puede tocar los controles (el resto los ve deshabilitados con un tooltip "Requiere rol Administrador" — mismo patrón que las pantallas de Procesos y Memoria). Tiene cuatro secciones:
 
 **Estado actual** — dos etiquetas de solo lectura que se llenan preguntándole a systemd (`systemctl show ... --value -p ActiveState/Result/LastTriggerUSec`), sin necesitar permisos especiales porque es una consulta, no una acción:
 - "Último respaldo automático": la última vez que se disparó el timer.
@@ -324,26 +409,49 @@ Accesible para cualquier rol, pero solo **admin_refugio** puede tocar los contro
 - **Automático** — habilita un combo box con 4 intervalos (Cada 1 día / 3 días / 1 semana / 1 mes, que internamente son 24/72/168/720 horas).
 - **Manual (solo con 'Respaldar ahora')** — deshabilita el combo; el respaldo solo corre si alguien lo dispara a mano.
 
-Al presionar "Guardar configuración", el GUI llama (vía `sudo -n`, sin pedir contraseña) al script `/usr/local/bin/pawos-configurar-respaldo`:
-- `pawos-configurar-respaldo manual` → apaga y deshabilita `pawos-backup.timer`, borra el *override* de horario si existía.
-- `pawos-configurar-respaldo auto <horas>` → escribe un *override* de systemd en `/etc/systemd/system/pawos-backup.timer.d/override.conf` (limpia el `OnCalendar` original de "todos los días a las 11pm" y lo reemplaza por `OnUnitActiveSec=<horas>h`, es decir "cada tantas horas desde la última vez que corrió"), recarga systemd y habilita el timer.
+Debajo, el campo **"Etiqueta por defecto"** (ver arriba) — un cuadro de texto libre, sin controles de modo asociados.
 
-En ambos casos el script deja registrado el modo elegido en `/var/pawos/backup_modo.txt` (por ejemplo `manual` o `automatico:72`), que es lo que el GUI vuelve a leer cada vez que abre la pantalla para mostrar el modo actual ya seleccionado.
+Al presionar "Guardar configuración", el GUI hace dos cosas:
+1. Llama (vía `sudo -n`, sin pedir contraseña) al script `/usr/local/bin/pawos-configurar-respaldo`:
+   - `pawos-configurar-respaldo manual` → apaga y deshabilita `pawos-backup.timer`, borra el *override* de horario si existía.
+   - `pawos-configurar-respaldo auto <horas>` → escribe un *override* de systemd en `/etc/systemd/system/pawos-backup.timer.d/override.conf` (limpia el `OnCalendar` original de "todos los días a las 11pm" y lo reemplaza por `OnUnitActiveSec=<horas>h`, es decir "cada tantas horas desde la última vez que corrió"), recarga systemd y habilita el timer.
+2. Escribe el contenido del campo "Etiqueta por defecto" directo a `/var/pawos/backup_etiqueta_auto.txt` (sin `sudo`: `/var/pawos` es escribible por el grupo `pawos-refugio`, al que pertenece `admin_refugio` — ver `instalar-pawos.sh`, sección 6).
+
+En ambos casos el resultado queda registrado en archivos que el GUI vuelve a leer cada vez que abre la pantalla, para mostrar el estado ya guardado: el modo en `/var/pawos/backup_modo.txt` (por ejemplo `manual` o `automatico:72`) y la etiqueta por defecto en `/var/pawos/backup_etiqueta_auto.txt`.
+
+**Historial de respaldos** — una tabla (fecha local, etiqueta y tamaño) con todo lo que hay guardado en Google Drive, llenada al abrir la pantalla (y cada vez que se presiona "Actualizar estado") corriendo `pawos-listar-respaldos` y parseando su salida línea por línea. Debajo, el botón "Restaurar seleccionado":
+1. Exige que haya una fila seleccionada en la tabla.
+2. Muestra un diálogo de confirmación (fecha y nombre del archivo elegido), porque es una acción destructiva — reemplaza la base de datos actual.
+3. Si se confirma, llama `pawos-restaurar-nube <archivo>`, que guarda la base de datos actual aparte antes de sobreescribirla (ver sección anterior).
+
+Como con "Respaldar ahora", después de restaurar hay que cerrar y volver a abrir PawOS para que el CLI/GUI relean la base de datos ya restaurada (no la recargan sola mientras está corriendo) — importante: hay que cerrar el **programa completo**, no solo la ventana del módulo (por ejemplo "Gestión de mascotas"), porque la conexión a SQLite se abre una sola vez al arrancar y sigue apuntando al archivo viejo mientras el proceso no se reinicie.
 
 **Botones inferiores**:
-- "Actualizar estado" — vuelve a consultar systemd y refresca las dos etiquetas de arriba.
-- "Respaldar ahora" — dispara `sudo -n systemctl --no-block start pawos-backup.service`. La bandera `--no-block` es importante: sin ella, `systemctl start` espera a que el servicio termine por completo antes de devolver el control, lo cual congelaba la ventana entre 20 y 30 segundos (todo el programa se queda esperando esa única llamada, porque la GUI es de un solo hilo). Con `--no-block`, systemd solo encola la orden y el botón responde al instante; el resultado real hay que verlo después con "Actualizar estado".
+- "Actualizar estado" — vuelve a consultar systemd y refresca las dos etiquetas de arriba, y de paso recarga el historial.
+- "Respaldar ahora" — pide una etiqueta opcional (ver arriba) y dispara `pawos-backup-nube [etiqueta]`.
 - "Cerrar" — cierra la ventana.
+
+### Por qué esto corre en un hilo aparte (y no directo al presionar el botón)
+
+`pawos-listar-respaldos`, `pawos-restaurar-nube` y `pawos-backup-nube` hablan por red con Google Drive, y esa llamada puede tardar varios segundos (más si la conexión está lenta). Las primeras versiones de estas tres acciones llamaban al script directo con `system()`/`popen()` en el mismo hilo que dibuja la ventana (el hilo principal de GTK) — mientras esa llamada no terminaba, la ventana no podía redibujarse ni responder a clics, y GNOME terminaba mostrando el mensaje **"PawOS Refugio (GUI) no responde"** (confirmado en la práctica).
+
+La solución: cada una de esas tres acciones ahora corre el comando bloqueante dentro de un hilo nuevo (`g_thread_new`), y el resultado se aplica de vuelta a la interfaz con `g_idle_add` — que es la única forma segura de tocar widgets de GTK desde fuera del hilo principal. Mientras el hilo trabaja, el botón correspondiente se deshabilita (para no disparar la misma acción dos veces) y la ventana sigue respondiendo con normalidad. Por seguridad ante el caso de que la ventana se cierre mientras un hilo sigue trabajando (por ejemplo, restaurando), cada tarea revisa una bandera (`ContextoRespaldo::vivo`) antes de tocar cualquier widget; si la ventana ya se cerró, el resultado simplemente se descarta en vez de acceder a memoria ya liberada.
+
+Antes, "Respaldar ahora" usaba `systemctl --no-block start pawos-backup.service` (encolar la tarea en systemd y regresar de inmediato, sin esperar el resultado) como manera de no bloquear la ventana. Con el hilo en segundo plano ya no hace falta ese rodeo: ahora se llama directo a `pawos-backup-nube` (agregado a sudoers), lo que además permite mandarle la etiqueta opcional y mostrar el resultado real (éxito o error) apenas termina, en vez de tener que revisar "Actualizar estado" después. El respaldo automático (el timer diario) sigue usando el mismo servicio de systemd que antes, sin cambios.
 
 ### Permisos (sudoers)
 
-Todo esto funciona sin pedir contraseña gracias a una regla específica en `/etc/sudoers.d/pawos-respaldo`, que solo aplica al grupo `pawos-admin` (o sea, solo `admin_refugio`) y solo para estos dos comandos exactos:
+Todo esto funciona sin pedir contraseña gracias a una regla específica en `/etc/sudoers.d/pawos-respaldo`, que solo aplica al grupo `pawos-admin` (o sea, solo `admin_refugio`) y solo para estos cinco comandos exactos:
 
 ```
-%pawos-admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl --no-block start pawos-backup.service, /usr/local/bin/pawos-configurar-respaldo
+%pawos-admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl --no-block start pawos-backup.service, /usr/local/bin/pawos-configurar-respaldo, /usr/local/bin/pawos-listar-respaldos, /usr/local/bin/pawos-restaurar-nube, /usr/local/bin/pawos-backup-nube
 ```
 
-Si algún día se cambian los argumentos de cualquiera de esos dos comandos en el código C, hay que actualizar esta línea de sudoers para que coincida exactamente, o `sudo -n` fallará en silencio (sin pedir contraseña, pero sin ejecutar nada).
+(El `systemctl ... pawos-backup.service` se dejó en la lista por compatibilidad — lo sigue usando el respaldo automático — aunque "Respaldar ahora" ya no pasa por ahí, ver la sección de arriba sobre los hilos.)
+
+Si algún día se cambian los argumentos de cualquiera de esos comandos en el código C, hay que actualizar esta línea de sudoers para que coincida exactamente, o `sudo -n` fallará en silencio (sin pedir contraseña, pero sin ejecutar nada).
+
+> **Nota:** el hook `live-iso/hooks/0100-pawos-instalar.hook.chroot` (usado al armar la ISO) todavía no incluye `pawos-configurar-respaldo` ni su archivo de sudoers, así que tampoco tiene estos dos scripts nuevos — es una diferencia ya existente entre "instalar sobre un Debian normal" y "armar la ISO" que viene de antes de este cambio. Si se rearma la ISO, hay que portar también esa parte a mano.
 
 ## Requerimientos mínimos del curso — checklist
 

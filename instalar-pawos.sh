@@ -21,7 +21,7 @@ if [ ! -f "$BASE/Makefile" ]; then
 fi
 echo "=== 1. Instalando dependencias de compilacion y sistema ==="
 apt-get update
-apt-get install -y build-essential libncurses-dev libsqlite3-dev nasm ufw libgtk-3-dev pkg-config libcrypt-dev
+apt-get install -y build-essential libncurses-dev libsqlite3-dev nasm ufw libgtk-3-dev pkg-config libcrypt-dev python3
 echo "=== 2. Compilando PawOS desde el codigo fuente ==="
 cd "$BASE"
 make clean
@@ -40,17 +40,55 @@ cat > /usr/local/bin/pawos-backup-nube << 'BACKUPEOF'
 #!/bin/bash
 # pawos-backup-nube - Respaldo de datos de PawOS a Google Drive (rclone).
 # Requiere que 'rclone config' ya este configurado con el remote 'ggdrive'.
+#
+# Uso: pawos-backup-nube [etiqueta]
+#   [etiqueta] es opcional (la usa el boton "Respaldar ahora" del GUI,
+#   para poder reconocer un respaldo despues por nombre en vez de solo
+#   por fecha). Si no se da ninguna (por ejemplo, en el respaldo
+#   automatico diario de systemd, donde no hay nadie para escribirla),
+#   se usa la ETIQUETA POR DEFECTO guardada en
+#   /var/pawos/backup_etiqueta_auto.txt (la escribe el GUI al presionar
+#   "Guardar configuracion" en la pantalla de Respaldo en la Nube). Si
+#   tampoco hay una etiqueta por defecto guardada, el respaldo sale sin
+#   etiqueta, igual que antes.
 set -e
 REMOTE="ggdrive:PawOS_Backups"
-FECHA=$(date +%Y%m%d_%H%M%S)
+# Fecha con milisegundos (no solo segundos): Google Drive permite dos
+# archivos con el nombre identico en la misma carpeta (a diferencia de
+# un sistema de archivos normal), asi que si "Respaldar ahora" se
+# dispara dos veces muy seguido, sin los milisegundos podrian terminar
+# subiendose dos archivos con el mismo nombre - lo cual despues hace
+# fallar la restauracion por nombre ambiguo (ver pawos-restaurar-nube).
+FECHA=$(date +%Y%m%d_%H%M%S_%N); FECHA="${FECHA:0:19}"
+
+ETIQUETA_RAW="$1"
+if [ -z "$ETIQUETA_RAW" ] && [ -f /var/pawos/backup_etiqueta_auto.txt ]; then
+    ETIQUETA_RAW=$(cat /var/pawos/backup_etiqueta_auto.txt)
+fi
+
+# Etiqueta opcional: solo letras/numeros/guion/guion_bajo, maximo 40
+# caracteres, para que el nombre de archivo resultante sea siempre
+# valido y facil de manejar. Si queda vacia (no se dio ninguna, ni
+# explicita ni por defecto, o solo tenia caracteres invalidos), el
+# nombre queda igual que antes.
+ETIQUETA=""
+if [ -n "$ETIQUETA_RAW" ]; then
+    ETIQUETA=$(printf '%s' "$ETIQUETA_RAW" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-40)
+fi
+if [ -n "$ETIQUETA" ]; then
+    NOMBRE_ARCHIVO="pawos_${FECHA}_${ETIQUETA}.db"
+else
+    NOMBRE_ARCHIVO="pawos_${FECHA}.db"
+fi
+
 if [ -f /var/pawos/pawos.db ]; then
     DB="/var/pawos/pawos.db"
 else
     DB="pawos.db"
 fi
 if [ -f "$DB" ]; then
-    rclone copyto "$DB" "$REMOTE/pawos_${FECHA}.db"
-    echo "[$(date)] Respaldo de base de datos subido: pawos_${FECHA}.db"
+    rclone copyto "$DB" "$REMOTE/$NOMBRE_ARCHIVO"
+    echo "[$(date)] Respaldo de base de datos subido: $NOMBRE_ARCHIVO"
 else
     echo "[$(date)] No se encontro la base de datos, no se pudo respaldar."
 fi
@@ -111,6 +149,138 @@ echo "Uso: pawos-configurar-respaldo manual | auto <horas>"
 exit 1
 CONFEOF
 chmod 755 /usr/local/bin/pawos-configurar-respaldo
+echo "=== 4c. Creando script para listar el historial de respaldos ==="
+cat > /usr/local/bin/pawos-listar-respaldos << 'LISTAEOF'
+#!/bin/bash
+# pawos-listar-respaldos - Muestra el registro de respaldos que ya
+# existen en Google Drive (mas reciente primero), para que el GUI
+# ("Respaldo en la Nube") pueda ofrecer restaurar alguno.
+#
+# Usa 'rclone lsjson' sin ningun filtro de rclone (--include,
+# --files-only): en pruebas reales esos filtros resultaron poco
+# confiables (un --include exacto por nombre dejaba pasar la carpeta
+# "archivos_backups" que vive en la misma carpeta de Drive; combinado
+# con --files-only, en cambio, no devolvia nada aunque el archivo si
+# existiera). En vez de eso, se trae la lista completa sin filtrar y se
+# filtra/ordena con Python (mas predecible).
+#
+# Salida: una linea por respaldo, con TABULADOR entre columnas (la
+# fecha trae un espacio adentro, por eso no se separa por espacios):
+#   <fecha, hora LOCAL de esta maquina>\t<tamano en bytes>\t<archivo>\t<etiqueta o vacio>
+#
+# La fecha se convierte de UTC (lo que da Drive) a la zona horaria
+# local del sistema con datetime.astimezone() - antes se mostraba tal
+# cual en UTC, lo cual no coincidia con la hora local ni con las demas
+# fechas que muestra el GUI (esas si usan hora local, via systemctl).
+#
+# La etiqueta sale del nombre del archivo: "Respaldar ahora" puede
+# guardar uno con un nombre extra al final, por ejemplo
+# "pawos_20260815_180230_512_antes-de-prueba.db" -> etiqueta
+# "antes-de-prueba". Los respaldos automaticos (sin etiqueta) quedan
+# con el nombre de siempre, "pawos_20260815_180230_512.db".
+set -e
+REMOTE="ggdrive:PawOS_Backups"
+rclone lsjson "$REMOTE" 2>/dev/null | python3 -c '
+import json, re, sys
+from datetime import datetime
+
+try:
+    datos = json.load(sys.stdin)
+except Exception:
+    datos = []
+filas = [d for d in datos
+         if not d.get("IsDir") and d.get("Name", "").startswith("pawos_")
+         and d.get("Name", "").endswith(".db")]
+filas.sort(key=lambda d: d.get("ModTime", ""), reverse=True)
+
+patron = re.compile(r"^pawos_\d{8}_\d{6}_\d{3}(?:_(.+))?\.db$")
+
+for d in filas:
+    modtime = d.get("ModTime", "")
+    try:
+        dt = datetime.fromisoformat(modtime.replace("Z", "+00:00"))
+        fecha = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        fecha = modtime
+    tam = d.get("Size", 0)
+    nombre = d.get("Name", "")
+    m = patron.match(nombre)
+    etiqueta = m.group(1) if (m and m.group(1)) else ""
+    print(f"{fecha}\t{tam}\t{nombre}\t{etiqueta}")
+'
+LISTAEOF
+chmod 755 /usr/local/bin/pawos-listar-respaldos
+echo "=== 4d. Creando script para restaurar la base de datos desde la nube ==="
+cat > /usr/local/bin/pawos-restaurar-nube << 'RESTAUREOF'
+#!/bin/bash
+# pawos-restaurar-nube - Restaura /var/pawos/pawos.db desde un respaldo
+# especifico de Google Drive (el nombre EXACTO tiene que venir de
+# 'pawos-listar-respaldos' o de la tabla del GUI - la fecha que se
+# muestra ahi es la fecha de modificacion en Drive, no forma parte del
+# nombre real del archivo, asi que no se debe reconstruir el nombre a
+# mano a partir de la fecha). Antes de sobreescribir, guarda una copia
+# de la base de datos actual (nunca se borra sola) por si el restore
+# fue un error.
+#
+# Uso: pawos-restaurar-nube <archivo>   (ej. pawos_20260815_165651.db)
+#
+# Por que se restaura por ID y no por nombre/copyto: Google Drive
+# permite que existan dos archivos con el nombre identico en la misma
+# carpeta (no hay restriccion de unicidad como en un sistema de
+# archivos normal), asi que pedirlo por nombre puede ser ambiguo. Y,
+# como en pawos-listar-respaldos, los filtros de rclone (--include,
+# --files-only) resultaron poco confiables en pruebas reales. Por eso
+# aqui tambien se usa 'rclone lsjson' sin filtrar, se busca el ID unico
+# con Python comparando el nombre exacto, y se restaura por ese ID con
+# 'rclone backend copyid' (que si identifica un archivo sin ambiguedad).
+set -e
+REMOTE_BASE="ggdrive:"
+REMOTE="${REMOTE_BASE}PawOS_Backups"
+ARCHIVO="$1"
+if [ -z "$ARCHIVO" ]; then
+    echo "Uso: pawos-restaurar-nube <archivo>"
+    exit 1
+fi
+case "$ARCHIVO" in
+    pawos_*.db) ;;
+    *) echo "ERROR: nombre de archivo invalido (debe ser pawos_AAAAMMDD_HHMMSS[_ms].db)."; exit 1 ;;
+esac
+
+ID=$(rclone lsjson "$REMOTE" 2>/dev/null | python3 -c '
+import json, sys
+archivo = sys.argv[1]
+try:
+    datos = json.load(sys.stdin)
+except Exception:
+    datos = []
+filas = [d for d in datos if not d.get("IsDir") and d.get("Name") == archivo]
+filas.sort(key=lambda d: d.get("ModTime", ""), reverse=True)
+if filas:
+    print(filas[0].get("ID", ""))
+' "$ARCHIVO")
+
+if [ -z "$ID" ]; then
+    echo "ERROR: no se encontro '$ARCHIVO' en Google Drive."
+    exit 1
+fi
+
+mkdir -p /var/pawos
+if [ -f /var/pawos/pawos.db ]; then
+    cp /var/pawos/pawos.db "/var/pawos/pawos.db.antes-de-restaurar.$(date +%Y%m%d_%H%M%S)"
+fi
+
+# Restaura primero a un archivo temporal y solo al final lo pone en su
+# lugar (mv): si "rclone backend copyid" fallara a medias, pawos.db
+# real nunca queda a medio escribir.
+TMP="/var/pawos/pawos.db.restaurando.tmp"
+rm -f "$TMP"
+rclone backend copyid "$REMOTE_BASE" "$ID" "$TMP"
+mv "$TMP" /var/pawos/pawos.db
+chown root:pawos-refugio /var/pawos/pawos.db
+chmod 660 /var/pawos/pawos.db
+echo "[$(date)] Base de datos restaurada desde $ARCHIVO (id $ID)"
+RESTAUREOF
+chmod 755 /usr/local/bin/pawos-restaurar-nube
 echo "=== 5. Creando grupos y usuarios de PawOS ==="
 for g in pawos-admin pawos-veterinario pawos-voluntario pawos-refugio; do
     getent group "$g" >/dev/null || groupadd "$g"
@@ -142,10 +312,15 @@ cat > /etc/sudoers.d/pawos-apagar << 'SUDOEOF'
 SUDOEOF
 chmod 440 /etc/sudoers.d/pawos-apagar
 # Permiso aparte, solo para Administrador: disparar el respaldo manualmente
-# y cambiar entre respaldo automatico/manual desde la pantalla "Respaldo en
-# la Nube" del GUI, sin que la aplicacion tenga que pedir contrasena.
+# (con o sin etiqueta), cambiar entre respaldo automatico/manual, y
+# ver/restaurar el historial de respaldos, todo desde la pantalla
+# "Respaldo en la Nube" del GUI, sin que la aplicacion tenga que pedir
+# contrasena. "pawos-backup-nube" se agrega para que el boton "Respaldar
+# ahora" pueda llamarlo directo (en un hilo aparte) y pasarle la
+# etiqueta opcional; el "systemctl ... pawos-backup.service" se deja
+# igual por compatibilidad (lo sigue usando el respaldo automatico).
 cat > /etc/sudoers.d/pawos-respaldo << 'SUDOEOF2'
-%pawos-admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl --no-block start pawos-backup.service, /usr/local/bin/pawos-configurar-respaldo
+%pawos-admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl --no-block start pawos-backup.service, /usr/local/bin/pawos-configurar-respaldo, /usr/local/bin/pawos-listar-respaldos, /usr/local/bin/pawos-restaurar-nube, /usr/local/bin/pawos-backup-nube
 SUDOEOF2
 chmod 440 /etc/sudoers.d/pawos-respaldo
 echo "=== 8. Instalando servicios systemd ==="
