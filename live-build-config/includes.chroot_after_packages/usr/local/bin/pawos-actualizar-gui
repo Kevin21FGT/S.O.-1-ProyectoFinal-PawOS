@@ -1,59 +1,97 @@
 #!/bin/bash
 # pawos-actualizar-gui - Busca e instala la ultima version de PawOS
-# Refugio (CLI y GUI) directo desde GitHub, sin necesidad de una ISO
-# nueva. Pensado para lanzarse desde un boton dentro de la propia GUI
-# (en una terminal, para que se vea el progreso y funcione el sudo).
-set -e
+# Refugio (CLI y GUI). Salida generica (sin URLs de repo ni nombres de
+# rama en pantalla), y el origen esta codificado en base64 para que no
+# aparezca en texto plano al abrir el script. Muestra las novedades
+# antes de instalar, y mensajes de error claros si algo falla.
 
-REPO_URL="https://github.com/Kevin21FGT/S.O.-1-ProyectoFinal-PawOS.git"
-REPO_DIR="$HOME/S.O.-1-ProyectoFinal-PawOS"
-RAMA="rama-Kevin"
+REPO_URL=$(echo "aHR0cHM6Ly9naXRodWIuY29tL0tldmluMjFGR1QvUy5PLi0xLVByb3llY3RvRmluYWwtUGF3T1MuZ2l0" | base64 -d)
+REPO_DIR="$HOME/.pawos-src"
+RAMA=$(echo "cmFtYS1LZXZpbg==" | base64 -d)
 
 echo "======================================"
-echo "  PawOS - Buscador de actualizaciones"
+echo "      PawOS - Actualizaciones"
 echo "======================================"
 echo ""
+echo "Buscando actualizaciones..."
 
 if ! command -v git >/dev/null 2>&1; then
-  echo "ERROR: git no esta instalado. No se puede actualizar."
+  echo ""
+  echo "ERROR: no se pudo buscar actualizaciones (falta git en el sistema)."
+  read -p "Presiona Enter para cerrar..."
   exit 1
 fi
 
 if [ -d "$REPO_DIR/.git" ]; then
-  echo "== Repositorio local encontrado, revisando cambios =="
-  cd "$REPO_DIR"
-  git fetch origin "$RAMA"
+  cd "$REPO_DIR" || { echo "ERROR: no se pudo acceder a la copia local."; read -p "Presiona Enter para cerrar..."; exit 1; }
+  if ! git fetch origin "$RAMA" >/dev/null 2>&1; then
+    echo ""
+    echo "ERROR: no se pudo conectar para buscar actualizaciones."
+    echo "Revisa tu conexion a internet e intenta de nuevo."
+    read -p "Presiona Enter para cerrar..."
+    exit 1
+  fi
   LOCAL=$(git rev-parse HEAD)
   REMOTE=$(git rev-parse "origin/$RAMA")
   if [ "$LOCAL" = "$REMOTE" ]; then
     echo ""
-    echo "Ya tienes la ultima version. No hay nada que actualizar."
+    echo "Ya tienes la ultima version instalada."
     read -p "Presiona Enter para cerrar..."
     exit 0
   fi
-  echo "Hay una version nueva, actualizando..."
-  git checkout "$RAMA"
-  git pull origin "$RAMA"
+
+  echo ""
+  echo "Novedades de esta actualizacion:"
+  git log "$LOCAL..$REMOTE" --pretty=format:"  - %s" | head -15
+  echo ""
+  echo ""
+  echo "Descargando..."
+  if ! git checkout "$RAMA" >/dev/null 2>&1 || ! git pull origin "$RAMA" >/dev/null 2>&1; then
+    echo ""
+    echo "ERROR: no se pudo descargar la actualizacion."
+    read -p "Presiona Enter para cerrar..."
+    exit 1
+  fi
 else
-  echo "== No hay copia local, clonando por primera vez (puede tardar) =="
-  git clone --branch "$RAMA" "$REPO_URL" "$REPO_DIR"
-  cd "$REPO_DIR"
+  echo "Descargando por primera vez (puede tardar un momento)..."
+  if ! git clone --branch "$RAMA" "$REPO_URL" "$REPO_DIR" >/dev/null 2>&1; then
+    echo ""
+    echo "ERROR: no se pudo descargar PawOS. Revisa tu conexion a internet."
+    read -p "Presiona Enter para cerrar..."
+    exit 1
+  fi
+  cd "$REPO_DIR" || exit 1
 fi
 
 echo ""
-echo "== Recompilando PawOS Refugio (CLI y GUI) =="
-make clean-gui && make gui
-make clean && make
+echo "Instalando actualizacion..."
+if ! { make clean-gui >/dev/null 2>&1 && make gui >/dev/null 2>&1; }; then
+  echo ""
+  echo "ERROR: la actualizacion se descargo pero no se pudo compilar la GUI."
+  echo "Se conserva la version que ya tenias instalada."
+  read -p "Presiona Enter para cerrar..."
+  exit 1
+fi
+if ! { make clean >/dev/null 2>&1 && make >/dev/null 2>&1; }; then
+  echo ""
+  echo "ERROR: la actualizacion se descargo pero no se pudo compilar el CLI."
+  echo "Se conserva la version que ya tenias instalada."
+  read -p "Presiona Enter para cerrar..."
+  exit 1
+fi
 
-echo ""
-echo "== Instalando (puede pedir tu contraseña de sudo) =="
-sudo cp pawos-refugio-gui /usr/local/bin/pawos-refugio-gui
-sudo cp pawos-refugio /usr/local/bin/pawos-refugio
+if ! sudo cp pawos-refugio-gui /usr/local/bin/pawos-refugio-gui || \
+   ! sudo cp pawos-refugio /usr/local/bin/pawos-refugio; then
+  echo ""
+  echo "ERROR: no se pudo instalar la actualizacion (permisos)."
+  read -p "Presiona Enter para cerrar..."
+  exit 1
+fi
 sudo chmod 755 /usr/local/bin/pawos-refugio-gui /usr/local/bin/pawos-refugio
 
 echo ""
 echo "======================================"
-echo "  Listo! PawOS se actualizo correctamente."
-echo "  Cierra y vuelve a abrir el programa para ver los cambios."
+echo "  Actualizacion completada."
+echo "  Cierra y vuelve a abrir PawOS para ver los cambios."
 echo "======================================"
 read -p "Presiona Enter para cerrar..."
