@@ -1,12 +1,12 @@
 #!/bin/bash
 # pawos-actualizar-gui - Busca e instala la ultima version de PawOS
-# Refugio (CLI y GUI). Salida generica (sin URLs de repo ni nombres de
-# rama en pantalla), y el origen esta codificado en base64 para que no
-# aparezca en texto plano al abrir el script. Muestra las novedades
-# antes de instalar, y mensajes de error claros si algo falla.
+# Refugio (CLI y GUI). Salida generica, origen codificado en base64.
+# Usa una ruta fija (/opt/pawos-src) en vez de $HOME para que las
+# reglas de sudoers (que necesitan rutas exactas) funcionen sin
+# importar que usuario (admin/veterinario/voluntario) lo ejecute.
 
 REPO_URL=$(echo "aHR0cHM6Ly9naXRodWIuY29tL0tldmluMjFGR1QvUy5PLi0xLVByb3llY3RvRmluYWwtUGF3T1MuZ2l0" | base64 -d)
-REPO_DIR="$HOME/.pawos-src"
+REPO_DIR="/opt/pawos-src"
 RAMA=$(echo "cmFtYS1LZXZpbg==" | base64 -d)
 
 echo "======================================"
@@ -57,6 +57,7 @@ else
   if ! git clone --branch "$RAMA" "$REPO_URL" "$REPO_DIR" >/dev/null 2>&1; then
     echo ""
     echo "ERROR: no se pudo descargar PawOS. Revisa tu conexion a internet."
+    echo "(Si el problema persiste, puede que falten permisos en /opt/pawos-src)"
     read -p "Presiona Enter para cerrar..."
     exit 1
   fi
@@ -80,14 +81,14 @@ if ! { make clean >/dev/null 2>&1 && make >/dev/null 2>&1; }; then
   exit 1
 fi
 
-if ! sudo cp pawos-refugio-gui /usr/local/bin/pawos-refugio-gui || \
-   ! sudo cp pawos-refugio /usr/local/bin/pawos-refugio; then
+if ! sudo /usr/bin/cp "$REPO_DIR/pawos-refugio-gui" /usr/local/bin/pawos-refugio-gui || \
+   ! sudo /usr/bin/cp "$REPO_DIR/pawos-refugio" /usr/local/bin/pawos-refugio; then
   echo ""
   echo "ERROR: no se pudo instalar la actualizacion (permisos)."
   read -p "Presiona Enter para cerrar..."
   exit 1
 fi
-sudo chmod 755 /usr/local/bin/pawos-refugio-gui /usr/local/bin/pawos-refugio
+sudo /usr/bin/chmod 755 /usr/local/bin/pawos-refugio-gui /usr/local/bin/pawos-refugio
 
 echo ""
 echo "======================================"
