@@ -7,6 +7,10 @@
 
 REPO_URL=$(echo "aHR0cHM6Ly9naXRodWIuY29tL0tldmluMjFGR1QvUy5PLi0xLVByb3llY3RvRmluYWwtUGF3T1MuZ2l0" | base64 -d)
 REPO_DIR="/opt/pawos-src"
+
+# Evita el error de git "posesion dudosa" ya que la carpeta la crea
+# root pero la usan distintos usuarios (admin/veterinario/voluntario).
+git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
 RAMA=$(echo "cmFtYS1LZXZpbg==" | base64 -d)
 
 echo "======================================"
