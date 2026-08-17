@@ -85,14 +85,25 @@ if ! { make clean >/dev/null 2>&1 && make >/dev/null 2>&1; }; then
   exit 1
 fi
 
-if ! sudo /usr/bin/cp "$REPO_DIR/pawos-refugio-gui" /usr/local/bin/pawos-refugio-gui || \
-   ! sudo /usr/bin/cp "$REPO_DIR/pawos-refugio" /usr/local/bin/pawos-refugio; then
+# Se copia con otro nombre y se renombra encima (mv), en vez de
+# sobrescribir directo, porque el binario puede estar corriendo en
+# este momento (el usuario abrio el actualizador desde la propia app)
+# y sobrescribirlo directo da "Text file busy".
+if ! sudo /usr/bin/cp "$REPO_DIR/pawos-refugio-gui" /usr/local/bin/pawos-refugio-gui.new || \
+   ! sudo /usr/bin/cp "$REPO_DIR/pawos-refugio" /usr/local/bin/pawos-refugio.new; then
   echo ""
   echo "ERROR: no se pudo instalar la actualizacion (permisos)."
   read -p "Presiona Enter para cerrar..."
   exit 1
 fi
-sudo /usr/bin/chmod 755 /usr/local/bin/pawos-refugio-gui /usr/local/bin/pawos-refugio
+sudo /usr/bin/chmod 755 /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio.new
+if ! sudo /usr/bin/mv -f /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio-gui || \
+   ! sudo /usr/bin/mv -f /usr/local/bin/pawos-refugio.new /usr/local/bin/pawos-refugio; then
+  echo ""
+  echo "ERROR: no se pudo instalar la actualizacion (permisos)."
+  read -p "Presiona Enter para cerrar..."
+  exit 1
+fi
 
 echo ""
 echo "======================================"
