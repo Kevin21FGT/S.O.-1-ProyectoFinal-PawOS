@@ -37,6 +37,7 @@
 #include "../include/auth.h"
 #include "../include/procesos.h"
 #include "../include/memoria.h"
+#include "../include/version.h"
 
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
 #define ID_PROCESO_DEMO 1u
@@ -2732,6 +2733,14 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='x-large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
     gtk_widget_set_halign(titulo, GTK_ALIGN_CENTER);
     gtk_box_pack_start(GTK_BOX(banner), titulo, FALSE, FALSE, 0);
+
+    GtkWidget *lbl_version = gtk_label_new(NULL);
+    gchar *markup_version = g_strdup_printf("<span size='small'>v%s</span>", PAWOS_VERSION);
+    gtk_label_set_markup(GTK_LABEL(lbl_version), markup_version);
+    g_free(markup_version);
+    gtk_widget_set_halign(lbl_version, GTK_ALIGN_CENTER);
+    gtk_style_context_add_class(gtk_widget_get_style_context(lbl_version), "subtitulo-banner");
+    gtk_box_pack_start(GTK_BOX(banner), lbl_version, FALSE, FALSE, 0);
 
     GtkWidget *fila_usuario = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(fila_usuario, GTK_ALIGN_CENTER);
