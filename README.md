@@ -311,6 +311,10 @@ Antes de usarla como entrega final, se prueba arrancándola en una VM nueva (no 
 2. Montar `live-image-amd64.hybrid.iso` como unidad óptica (IDE, no SATA — más confiable en VirtualBox).
 3. Arrancar y confirmar: que carga el escritorio con el fondo de pantalla de PawOS, que se puede iniciar sesión con `admin_refugio` / `veterinario1` / `voluntario1`, que `pawos-refugio-gui` abre y funciona, y que el ícono "Instalar PawOS" deja el sistema instalado de forma permanente en el disco virtual.
 
+> **Nota sobre VirtualBox y discos NVMe:** si al crear el disco virtual VirtualBox lo conecta como controlador NVMe (el instalador lo muestra como `/dev/nvme0n1`) y la VM sigue en BIOS clásico (sin UEFI), Calamares termina la instalación sin errores pero el sistema **no arranca después** ("La máquina virtual falló al iniciar... no hallarse un sistema operativo") — SeaBIOS no sabe arrancar desde NVMe. Se soluciona activando UEFI en la VM (Configuración → Sistema → Placa base → casilla "UEFI") **antes** de correr Calamares, o adjuntando el disco a un controlador SATA/IDE en vez de NVMe. Con UEFI activado, Calamares detecta el modo "EFI" solo (se ve en la esquina superior izquierda del paso de Particiones) y arma la partición de arranque correcta sin pedir nada extra.
+>
+> Los tres usuarios (`admin_refugio`, `veterinario1`, `voluntario1`, ver [Usuarios y roles](#usuarios-y-roles)) ya vienen dentro del sistema que Calamares copia al disco, así que siguen funcionando con su rol normal después de instalar. La cuenta nueva que Calamares pide crear durante el asistente (con datos propios del que instala) **no** queda en ningún grupo `pawos-*`, así que no tiene rol asignado dentro de PawOS — para usar la app, iniciar sesión con una de las tres cuentas de siempre.
+
 ### 7. Para USB booteable (opcional)
 
 Con Rufus (Windows): seleccionar el `.iso`, modo "DD Image" (no "ISO normal", para que quede booteable como sistema live) y grabarlo en el USB.
