@@ -21,7 +21,7 @@ if [ ! -f "$BASE/Makefile" ]; then
 fi
 echo "=== 1. Instalando dependencias de compilacion y sistema ==="
 apt-get update
-apt-get install -y build-essential libncurses-dev libsqlite3-dev nasm ufw libgtk-3-dev pkg-config libcrypt-dev python3
+apt-get install -y build-essential libncurses-dev libsqlite3-dev nasm ufw libgtk-3-dev pkg-config libcrypt-dev python3 rclone
 echo "=== 2. Compilando PawOS desde el codigo fuente ==="
 cd "$BASE"
 make clean

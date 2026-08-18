@@ -1,0 +1,7 @@
+
+[Desktop Entry]
+Type=Application
+Name=PawOS Refugio
+Exec=xterm -fullscreen -e /usr/local/bin/pawos-refugio
+Terminal=false
+Icon=utilities-terminal

@@ -17,6 +17,7 @@ PawOS no es una distribución armada desde cero: es Debian 13 oficial, con un pr
 - [Instalar PawOS sobre un Debian ya instalado](#instalar-pawos-sobre-un-debian-ya-instalado)
 - [Construir la ISO instalable](#construir-la-iso-instalable)
 - [Servicios del sistema (systemd)](#servicios-del-sistema-systemd)
+- [Actualizaciones automáticas (botón "Buscar Actualizaciones")](#actualizaciones-automáticas-botón-buscar-actualizaciones)
 - [Seguridad — estado actual](#seguridad--estado-actual)
 - [Respaldo en la nube — estado actual](#respaldo-en-la-nube--estado-actual)
 - [Requerimientos mínimos del curso — checklist](#requerimientos-mínimos-del-curso--checklist)
@@ -78,6 +79,8 @@ Estos son los paquetes que el propio código de PawOS necesita — para compilar
 | `python3` | No lo usa el programa en C, pero sí los scripts `pawos-listar-respaldos`/`pawos-restaurar-nube` (ver [Respaldo en la nube](#respaldo-en-la-nube--estado-actual)), para filtrar el listado de respaldos de Google Drive de forma confiable. Normalmente ya viene con Debian + GNOME, pero `instalar-pawos.sh` lo pide explícitamente por si acaso. |
 
 En tiempo de ejecución, el `Makefile` enlaza cada binario con `-lncurses -lsqlite3 -lm -lcrypt` (CLI/demonio/monitor) o con las librerías de GTK3 que entrega `pkg-config` (GUI) — `-lm` es la librería matemática de C (siempre disponible con glibc, usada por ejemplo en los cálculos de porcentajes de CPU/memoria del servidor de monitoreo).
+
+> **Nota:** estas librerías de compilación (`build-essential`, `libncurses-dev`, `libsqlite3-dev`, `libgtk-3-dev`, `pkg-config`, `nasm`) además de `git`, ya no son solo para quien desarrolla PawOS en su propia máquina — la ISO instalable también las incluye, porque el botón "Buscar Actualizaciones" del GUI recompila el programa directo en el equipo del usuario final (ver [Actualizaciones automáticas](#actualizaciones-automáticas-botón-buscar-actualizaciones)).
 
 ## Estructura del proyecto
 
@@ -308,6 +311,10 @@ Antes de usarla como entrega final, se prueba arrancándola en una VM nueva (no 
 2. Montar `live-image-amd64.hybrid.iso` como unidad óptica (IDE, no SATA — más confiable en VirtualBox).
 3. Arrancar y confirmar: que carga el escritorio con el fondo de pantalla de PawOS, que se puede iniciar sesión con `admin_refugio` / `veterinario1` / `voluntario1`, que `pawos-refugio-gui` abre y funciona, y que el ícono "Instalar PawOS" deja el sistema instalado de forma permanente en el disco virtual.
 
+> **Nota sobre VirtualBox y discos NVMe:** si al crear el disco virtual VirtualBox lo conecta como controlador NVMe (el instalador lo muestra como `/dev/nvme0n1`) y la VM sigue en BIOS clásico (sin UEFI), Calamares termina la instalación sin errores pero el sistema **no arranca después** ("La máquina virtual falló al iniciar... no hallarse un sistema operativo") — SeaBIOS no sabe arrancar desde NVMe. Se soluciona activando UEFI en la VM (Configuración → Sistema → Placa base → casilla "UEFI") **antes** de correr Calamares, o adjuntando el disco a un controlador SATA/IDE en vez de NVMe. Con UEFI activado, Calamares detecta el modo "EFI" solo (se ve en la esquina superior izquierda del paso de Particiones) y arma la partición de arranque correcta sin pedir nada extra.
+>
+> Los tres usuarios (`admin_refugio`, `veterinario1`, `voluntario1`, ver [Usuarios y roles](#usuarios-y-roles)) ya vienen dentro del sistema que Calamares copia al disco, así que siguen funcionando con su rol normal después de instalar. La cuenta nueva que Calamares pide crear durante el asistente (con datos propios del que instala) **no** queda en ningún grupo `pawos-*`, así que no tiene rol asignado dentro de PawOS — para usar la app, iniciar sesión con una de las tres cuentas de siempre.
+
 ### 7. Para USB booteable (opcional)
 
 Con Rufus (Windows): seleccionar el `.iso`, modo "DD Image" (no "ISO normal", para que quede booteable como sistema live) y grabarlo en el USB.
@@ -328,6 +335,41 @@ Rearmar la ISO (este proceso de `lb build`) solo hace falta cuando se necesita u
 | `pawos-vacunas.timer` | Revisa vacunas pendientes | Todos los días a las 8:00 AM |
 | `pawos-backup.timer` | Sube respaldo a la nube | Automático o manual, configurable desde el GUI (ver abajo) |
 | `ufw` (firewall) | Solo permite el puerto 8080 desde redes locales (192.168.x.x, 10.x.x.x, 172.16-31.x.x) | Al iniciar el sistema |
+
+## Actualizaciones automáticas (botón "Buscar Actualizaciones")
+
+Además de reconstruir la ISO completa (ver sección anterior), PawOS Refugio tiene un mecanismo para actualizarse a sí mismo desde dentro del GUI, sin reinstalar el sistema operativo ni volver a grabar ningún medio — pensado para que, una vez que un refugio ya tiene PawOS instalado, reciba correcciones de código sin necesitar volver a pasar por Calamares.
+
+### Qué hace
+
+Un botón "🔄 Buscar Actualizaciones" en el menú principal del GUI (`main_gtk.c`, junto a "Salir") abre una terminal y corre `/usr/local/bin/pawos-actualizar-gui`, que:
+
+1. Revisa si hay una versión más nueva del código en el repositorio remoto.
+2. Si la hay, muestra un resumen de las novedades (los mensajes de commit nuevos) antes de instalar nada.
+3. Descarga el código, recompila el CLI y el GUI (`make` / `make gui`), e instala los binarios nuevos en `/usr/local/bin`.
+4. Si algo falla en cualquier paso (sin internet, error de compilación, sin permisos), se conserva la versión que ya estaba funcionando y se muestra un mensaje de error claro — nunca deja el sistema a medio actualizar.
+
+### Diseño "de programa comercial" (sin exponer el repositorio)
+
+A pedido explícito del equipo, el actualizador se comporta como el de cualquier programa comercial (Windows Update, actualizador de una app de escritorio): el usuario final nunca ve la URL del repositorio de GitHub ni el nombre de la rama, ni en la salida de la terminal ni mirando el código del script — ambos datos están codificados en base64 dentro de `pawos-actualizar-gui` en vez de aparecer como texto plano.
+
+### Requisito nuevo en la ISO: herramientas de compilación
+
+Como la actualización recompila el programa **en la máquina del usuario final** (no descarga un binario ya compilado), la ISO tiene que traer instaladas las mismas herramientas que antes solo hacían falta en la máquina de quien desarrolla PawOS (ver la nota al final de [Requisitos del sistema y librerías](#requisitos-del-sistema-y-librerías)): `git`, `build-essential`, `pkg-config`, `libgtk-3-dev`, `libsqlite3-dev`, `libncurses-dev` y `nasm`.
+
+### Permisos: por qué hace falta `/opt/pawos-src` y una regla de sudoers
+
+El código se clona/actualiza en una carpeta fija del sistema, `/opt/pawos-src` (dueño `root:pawos-refugio`, permisos `2775` con *setgid*), en vez de en el `$HOME` de cada usuario — así, sin importar si actualiza `admin_refugio`, `veterinario1` o `voluntario1`, siempre es la misma ruta, lo que permite escribir una regla de `sudoers` con rutas exactas (`/etc/sudoers.d/pawos-actualizar`) que solo autoriza, sin pedir contraseña, los comandos puntuales para instalar el binario nuevo en `/usr/local/bin` — nada más.
+
+Como `/opt/pawos-src` lo crea `root` pero lo usan usuarios normales, git bloquea las operaciones ahí por seguridad ("posesión dudosa" / *dubious ownership*, protección agregada en versiones recientes de git); `pawos-actualizar-gui` se registra a sí mismo como excepción (`git config --global --add safe.directory`) automáticamente la primera vez que corre, sin que el usuario tenga que hacer nada a mano.
+
+### Por qué se instala con `cp` + `mv` en vez de `cp` directo
+
+El binario que se está actualizando (`pawos-refugio-gui`) normalmente sigue *corriendo* mientras el usuario usa el botón (abrió el actualizador desde dentro del programa). Sobreescribirlo directo con `cp` falla con `Text file busy`, porque Linux no deja modificar el contenido de un ejecutable que está en memoria en ese momento. La solución: copiar el binario nuevo con otro nombre (`pawos-refugio-gui.new`) y luego renombrarlo encima del viejo con `mv` — un renombrado sí es una operación atómica que el sistema permite aunque el archivo original esté en uso; el proceso que ya está corriendo sigue usando la versión vieja en memoria hasta que se cierra, y la próxima vez que se abra ya toma el binario nuevo.
+
+### Acceso desde Actividades de GNOME
+
+PawOS Refugio también tiene su propio lanzador (`/usr/share/applications/pawos-refugio-gui.desktop`), así que aparece al buscar "PawOS" en Actividades y se puede anclar al dock — antes solo se podía abrir desde una terminal.
 
 ## Seguridad — estado actual
 

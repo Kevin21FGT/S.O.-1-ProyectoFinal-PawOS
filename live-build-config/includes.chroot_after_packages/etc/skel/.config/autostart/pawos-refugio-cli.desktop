@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=PawOS Refugio (auto)
+Exec=xterm -fullscreen -e /usr/local/bin/pawos-refugio
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

@@ -28,6 +28,7 @@
  */
 
 #include <gtk/gtk.h>
+#include <cairo-pdf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +38,7 @@
 #include "../include/auth.h"
 #include "../include/procesos.h"
 #include "../include/memoria.h"
+#include "../include/version.h"
 
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
 #define ID_PROCESO_DEMO 1u
@@ -1160,7 +1162,9 @@ static void abrir_pantalla_donantes(GtkWidget *padre, Rol rol) {
 typedef struct {
     GtkWidget *ventana;
     GtkWidget *vista_texto;
+    GtkWidget *vista_historial;
     GtkWidget *lbl_estado;
+    GtkWidget *btn_guardar;
 } ContextoReportes;
 
 static void mostrar_contenido_archivo(GtkTextView *vista, const char *ruta) {
@@ -1178,6 +1182,133 @@ static void mostrar_contenido_archivo(GtkTextView *vista, const char *ruta) {
     fclose(f);
     gtk_text_buffer_set_text(buffer, contenido->str, -1);
     g_string_free(contenido, TRUE);
+}
+
+/* Escribe el contenido de texto plano de un reporte a un PDF simple:
+ * fuente monoespaciada, una linea de texto por linea del reporte, con
+ * paginacion automatica al llenarse la hoja (tamano carta). No hace
+ * falta ninguna libreria nueva: usa Cairo, que ya viene con GTK3. */
+static void dibujar_pie_pagina(cairo_t *cr, double ancho, double alto, double margen, int pagina) {
+    cairo_save(cr);
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 8.0);
+    cairo_set_source_rgb(cr, 0.55, 0.55, 0.55);
+
+    cairo_move_to(cr, margen, alto - 20.0);
+    cairo_show_text(cr, "PawOS Refugio");
+
+    char texto_pagina[32];
+    snprintf(texto_pagina, sizeof(texto_pagina), "Pagina %d", pagina);
+    cairo_text_extents_t ext;
+    cairo_text_extents(cr, texto_pagina, &ext);
+    cairo_move_to(cr, ancho - margen - ext.width, alto - 20.0);
+    cairo_show_text(cr, texto_pagina);
+
+    cairo_restore(cr);
+}
+
+/* Escribe el reporte con un diseno mas profesional: el titulo
+ * ("===== ... =====") se centra en verde institucional con una linea
+ * debajo, la fecha de generacion sale en cursiva gris, los encabezados
+ * de seccion ("-- ... --") salen en negrita, y cada pagina lleva un
+ * pie con el nombre del sistema y el numero de pagina. El resto del
+ * contenido sigue en monoespaciado, igual que antes. */
+static gboolean escribir_pdf_simple(const char *ruta, const char *contenido) {
+    const double ancho = 612.0, alto = 792.0; /* carta (Letter), en puntos */
+    const double margen = 40.0;
+    const double tam_fuente = 10.0;
+    const double interlineado = 14.0;
+    const double vr = 0.137, vg = 0.573, vb = 0.294; /* verde institucional PawOS */
+
+    cairo_surface_t *superficie = cairo_pdf_surface_create(ruta, ancho, alto);
+    if (cairo_surface_status(superficie) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(superficie);
+        return FALSE;
+    }
+    cairo_t *cr = cairo_create(superficie);
+
+    int pagina = 1;
+    double y = margen;
+
+    gchar **lineas = g_strsplit(contenido, "\n", -1);
+    for (int i = 0; lineas[i] != NULL; i++) {
+        const char *linea = lineas[i];
+        gboolean es_titulo = g_str_has_prefix(linea, "=====");
+        gboolean es_encabezado = strlen(linea) > 4 && g_str_has_prefix(linea, "--") && g_str_has_suffix(linea, "--");
+        gboolean es_fecha = g_str_has_prefix(linea, "Generado:");
+
+        double alto_linea = interlineado;
+        if (es_titulo) alto_linea = 26.0;
+        else if (es_encabezado) alto_linea = 20.0;
+
+        if (y + alto_linea > alto - margen) {
+            dibujar_pie_pagina(cr, ancho, alto, margen, pagina);
+            cairo_show_page(cr);
+            pagina++;
+            y = margen;
+        }
+
+        if (es_titulo) {
+            gchar *texto = g_strdup(linea);
+            g_strdelimit(texto, "=", ' ');
+            gchar *texto_limpio = g_strstrip(texto);
+
+            cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+            cairo_set_font_size(cr, 16.0);
+            cairo_set_source_rgb(cr, vr, vg, vb);
+            cairo_text_extents_t ext;
+            cairo_text_extents(cr, texto_limpio, &ext);
+            cairo_move_to(cr, (ancho - ext.width) / 2.0, y + 16.0);
+            cairo_show_text(cr, texto_limpio);
+
+            cairo_set_line_width(cr, 1.2);
+            cairo_move_to(cr, margen, y + 24.0);
+            cairo_line_to(cr, ancho - margen, y + 24.0);
+            cairo_stroke(cr);
+
+            g_free(texto);
+            y += alto_linea;
+        } else if (es_fecha) {
+            cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_ITALIC, CAIRO_FONT_WEIGHT_NORMAL);
+            cairo_set_font_size(cr, 9.0);
+            cairo_set_source_rgb(cr, 0.4, 0.4, 0.4);
+            cairo_text_extents_t ext;
+            cairo_text_extents(cr, linea, &ext);
+            cairo_move_to(cr, (ancho - ext.width) / 2.0, y + 10.0);
+            cairo_show_text(cr, linea);
+            y += alto_linea;
+        } else if (es_encabezado) {
+            gchar *texto = g_strdup(linea);
+            g_strdelimit(texto, "-", ' ');
+            gchar *texto_limpio = g_strstrip(texto);
+
+            cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+            cairo_set_font_size(cr, 11.5);
+            cairo_set_source_rgb(cr, vr * 0.7, vg * 0.7, vb * 0.7);
+            cairo_move_to(cr, margen, y + 14.0);
+            cairo_show_text(cr, texto_limpio);
+
+            g_free(texto);
+            y += alto_linea;
+        } else if (linea[0] == '\0') {
+            y += alto_linea * 0.6;
+        } else {
+            cairo_select_font_face(cr, "Monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+            cairo_set_font_size(cr, tam_fuente);
+            cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+            cairo_move_to(cr, margen, y + 9.0);
+            cairo_show_text(cr, linea);
+            y += alto_linea;
+        }
+    }
+    g_strfreev(lineas);
+
+    dibujar_pie_pagina(cr, ancho, alto, margen, pagina);
+    cairo_show_page(cr);
+    cairo_status_t estado = cairo_status(cr);
+    cairo_destroy(cr);
+    cairo_surface_destroy(superficie);
+    return estado == CAIRO_STATUS_SUCCESS;
 }
 
 static void on_generar_reporte_clicked(GtkButton *boton, gpointer datos) {
@@ -1203,6 +1334,180 @@ static void on_generar_reporte_clicked(GtkButton *boton, gpointer datos) {
     snprintf(estado_txt, sizeof(estado_txt), "Reporte generado en: %s", ruta_usada);
     gtk_label_set_text(GTK_LABEL(ctx->lbl_estado), estado_txt);
     mostrar_contenido_archivo(GTK_TEXT_VIEW(ctx->vista_texto), ruta_usada);
+    gtk_widget_set_sensitive(ctx->btn_guardar, TRUE);
+}
+
+/* Abre el dialogo estandar de "Guardar archivo" de GTK (el usuario
+ * elige carpeta y nombre libremente, no queda forzado a la ruta fija
+ * del sistema) y guarda el reporte ya generado como .txt o .pdf, segun
+ * el filtro que elija o la extension que escriba. */
+static void on_guardar_como_reporte_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    ContextoReportes *ctx = (ContextoReportes *)datos;
+
+    GtkWidget *dialogo = gtk_file_chooser_dialog_new(
+        "Guardar reporte como...", GTK_WINDOW(ctx->ventana),
+        GTK_FILE_CHOOSER_ACTION_SAVE,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_ACCEPT, NULL);
+    gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialogo), TRUE);
+    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialogo), "reporte_pawos.txt");
+
+    const char *carpeta_inicial = g_get_home_dir();
+    if (carpeta_inicial != NULL) {
+        gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialogo), carpeta_inicial);
+    }
+
+    GtkFileFilter *filtro_txt = gtk_file_filter_new();
+    gtk_file_filter_set_name(filtro_txt, "Texto (*.txt)");
+    gtk_file_filter_add_pattern(filtro_txt, "*.txt");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialogo), filtro_txt);
+
+    GtkFileFilter *filtro_pdf = gtk_file_filter_new();
+    gtk_file_filter_set_name(filtro_pdf, "PDF (*.pdf)");
+    gtk_file_filter_add_pattern(filtro_pdf, "*.pdf");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialogo), filtro_pdf);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) != GTK_RESPONSE_ACCEPT) {
+        gtk_widget_destroy(dialogo);
+        return;
+    }
+
+    gchar *ruta_elegida = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialogo));
+    GtkFileFilter *filtro_activo = gtk_file_chooser_get_filter(GTK_FILE_CHOOSER(dialogo));
+    gtk_widget_destroy(dialogo);
+    if (ruta_elegida == NULL) return;
+
+    gboolean quiere_pdf = (filtro_activo == filtro_pdf) || g_str_has_suffix(ruta_elegida, ".pdf");
+
+    /* Siempre normalizamos la extension segun el formato elegido, sin
+     * importar la extension del nombre sugerido por el dialogo. Antes,
+     * si el usuario elegia el filtro PDF pero no cambiaba el nombre
+     * por defecto "reporte_pawos.txt", el archivo se guardaba con
+     * extension .txt aunque el contenido fuera PDF (por eso "no
+     * funcionaba" el boton de PDF). */
+    gchar *ruta_sin_extension = g_strdup(ruta_elegida);
+    if (g_str_has_suffix(ruta_sin_extension, ".pdf") || g_str_has_suffix(ruta_sin_extension, ".txt")) {
+        ruta_sin_extension[strlen(ruta_sin_extension) - 4] = '\0';
+    }
+    gchar *ruta_final = g_strconcat(ruta_sin_extension, quiere_pdf ? ".pdf" : ".txt", NULL);
+    g_free(ruta_sin_extension);
+    g_free(ruta_elegida);
+
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(ctx->vista_texto));
+    GtkTextIter inicio, fin;
+    gtk_text_buffer_get_bounds(buffer, &inicio, &fin);
+    gchar *contenido_reporte = gtk_text_buffer_get_text(buffer, &inicio, &fin, FALSE);
+
+    gboolean ok;
+    if (quiere_pdf) {
+        ok = escribir_pdf_simple(ruta_final, contenido_reporte);
+    } else {
+        GError *error = NULL;
+        ok = g_file_set_contents(ruta_final, contenido_reporte, -1, &error);
+        if (error) g_error_free(error);
+    }
+
+    if (ok) {
+        char msg[600];
+        snprintf(msg, sizeof(msg), "Reporte guardado en:\n%s", ruta_final);
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), msg, FALSE);
+    } else {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo guardar el reporte en esa ubicacion.", TRUE);
+    }
+
+    g_free(contenido_reporte);
+    g_free(ruta_final);
+}
+
+/* ---- Historial de reportes generados (bitacora persistente) ---- */
+
+static void cargar_historial(ContextoReportes *ctx) {
+    const char *rutas[2] = { "/var/pawos/reportes/historial_reportes.log", "historial_reportes.log" };
+    FILE *f = NULL;
+    for (int i = 0; i < 2 && f == NULL; i++) f = fopen(rutas[i], "r");
+
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(ctx->vista_historial));
+    if (!f) {
+        gtk_text_buffer_set_text(buffer, "Todavia no hay reportes registrados.", -1);
+        return;
+    }
+
+    GPtrArray *lineas = g_ptr_array_new_with_free_func(g_free);
+    char linea[256];
+    while (fgets(linea, sizeof(linea), f) != NULL) {
+        g_ptr_array_add(lineas, g_strdup(linea));
+    }
+    fclose(f);
+
+    GString *texto = g_string_new(NULL);
+    if (lineas->len == 0) {
+        g_string_append(texto, "Todavia no hay reportes registrados.");
+    } else {
+        for (int i = (int)lineas->len - 1; i >= 0; i--) {
+            g_string_append(texto, (const char *)g_ptr_array_index(lineas, i));
+        }
+    }
+    gtk_text_buffer_set_text(buffer, texto->str, -1);
+    g_string_free(texto, TRUE);
+    g_ptr_array_free(lineas, TRUE);
+}
+
+static void agregar_entrada_historial(ContextoReportes *ctx, const char *tipo) {
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    char linea[256];
+    snprintf(linea, sizeof(linea), "%s - Reporte de %s\n", fecha, tipo);
+
+    FILE *f = fopen("/var/pawos/reportes/historial_reportes.log", "a");
+    if (!f) f = fopen("historial_reportes.log", "a");
+    if (f) {
+        fputs(linea, f);
+        fclose(f);
+    }
+
+    cargar_historial(ctx);
+}
+
+/* ---- Reportes individuales por categoria ---- */
+
+typedef struct {
+    ContextoReportes *ctx;
+    const char *nombre_tipo;
+    int (*generador)(const char *ruta_salida);
+    const char *ruta_fija;
+    const char *ruta_relativa;
+} DatosReporteCategoria;
+
+static void on_generar_reporte_categoria_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosReporteCategoria *d = (DatosReporteCategoria *)datos;
+    ContextoReportes *ctx = d->ctx;
+
+    const char *ruta_usada = NULL;
+    if (d->generador(d->ruta_fija) == 0) {
+        ruta_usada = d->ruta_fija;
+    } else if (d->generador(d->ruta_relativa) == 0) {
+        ruta_usada = d->ruta_relativa;
+    }
+
+    if (ruta_usada == NULL) {
+        char msg[200];
+        snprintf(msg, sizeof(msg), "No se pudo generar el reporte de %s.", d->nombre_tipo);
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), msg, TRUE);
+        return;
+    }
+
+    char estado_txt[220];
+    snprintf(estado_txt, sizeof(estado_txt), "Reporte de %s generado en: %s", d->nombre_tipo, ruta_usada);
+    gtk_label_set_text(GTK_LABEL(ctx->lbl_estado), estado_txt);
+    mostrar_contenido_archivo(GTK_TEXT_VIEW(ctx->vista_texto), ruta_usada);
+    gtk_widget_set_sensitive(ctx->btn_guardar, TRUE);
+
+    agregar_entrada_historial(ctx, d->nombre_tipo);
 }
 
 static void abrir_pantalla_reportes(GtkWidget *padre, Rol rol) {
@@ -1235,6 +1540,49 @@ static void abrir_pantalla_reportes(GtkWidget *padre, Rol rol) {
     gtk_widget_set_halign(btn_generar, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(caja), btn_generar, FALSE, FALSE, 0);
 
+    ctx->btn_guardar = gtk_button_new_with_label("Guardar como (.txt / .pdf)...");
+    gtk_widget_set_halign(ctx->btn_guardar, GTK_ALIGN_START);
+    gtk_widget_set_sensitive(ctx->btn_guardar, FALSE);
+    gtk_widget_set_tooltip_text(ctx->btn_guardar, "Genera un reporte primero para poder guardarlo donde quieras.");
+    gtk_box_pack_start(GTK_BOX(caja), ctx->btn_guardar, FALSE, FALSE, 0);
+
+    GtkWidget *lbl_categorias = gtk_label_new("Reportes por categoria:");
+    gtk_widget_set_halign(lbl_categorias, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl_categorias, FALSE, FALSE, 4);
+
+    GtkWidget *caja_categorias = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_pack_start(GTK_BOX(caja), caja_categorias, FALSE, FALSE, 0);
+
+    static const char *nombres_categorias[5] = {
+        "Mascotas", "Vacunas", "Adopciones", "Donantes", "Alertas de Sensores"
+    };
+    static const char *rutas_fijas_categorias[5] = {
+        "/var/pawos/reportes/reporte_mascotas.txt",
+        "/var/pawos/reportes/reporte_vacunas.txt",
+        "/var/pawos/reportes/reporte_adopciones.txt",
+        "/var/pawos/reportes/reporte_donantes.txt",
+        "/var/pawos/reportes/reporte_alertas.txt"
+    };
+    static const char *rutas_relativas_categorias[5] = {
+        "reporte_mascotas.txt", "reporte_vacunas.txt", "reporte_adopciones.txt",
+        "reporte_donantes.txt", "reporte_alertas.txt"
+    };
+    int (*generadores_categorias[5])(const char *) = {
+        reporte_generar_mascotas, reporte_generar_vacunas, reporte_generar_adopciones,
+        reporte_generar_donantes, reporte_generar_alertas
+    };
+    for (int i = 0; i < 5; i++) {
+        GtkWidget *btn_cat = gtk_button_new_with_label(nombres_categorias[i]);
+        gtk_box_pack_start(GTK_BOX(caja_categorias), btn_cat, FALSE, FALSE, 0);
+        DatosReporteCategoria *d = g_new0(DatosReporteCategoria, 1);
+        d->ctx = ctx;
+        d->nombre_tipo = nombres_categorias[i];
+        d->generador = generadores_categorias[i];
+        d->ruta_fija = rutas_fijas_categorias[i];
+        d->ruta_relativa = rutas_relativas_categorias[i];
+        g_signal_connect(btn_cat, "clicked", G_CALLBACK(on_generar_reporte_categoria_clicked), d);
+    }
+
     ctx->lbl_estado = gtk_label_new("Todavia no se ha generado ningun reporte en esta sesion.");
     gtk_widget_set_halign(ctx->lbl_estado, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(caja), ctx->lbl_estado, FALSE, FALSE, 0);
@@ -1247,11 +1595,27 @@ static void abrir_pantalla_reportes(GtkWidget *padre, Rol rol) {
     gtk_container_add(GTK_CONTAINER(scroll), ctx->vista_texto);
     gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
 
+    GtkWidget *lbl_historial = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(lbl_historial), "<b>Historial de reportes generados</b>");
+    gtk_widget_set_halign(lbl_historial, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl_historial, FALSE, FALSE, 4);
+
+    ctx->vista_historial = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(ctx->vista_historial), FALSE);
+    gtk_text_view_set_monospace(GTK_TEXT_VIEW(ctx->vista_historial), TRUE);
+    GtkWidget *scroll_historial = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_historial), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(scroll_historial, -1, 110);
+    gtk_container_add(GTK_CONTAINER(scroll_historial), ctx->vista_historial);
+    gtk_box_pack_start(GTK_BOX(caja), scroll_historial, FALSE, FALSE, 0);
+    cargar_historial(ctx);
+
     GtkWidget *btn_cerrar = gtk_button_new_with_label("Cerrar");
     gtk_widget_set_halign(btn_cerrar, GTK_ALIGN_END);
     gtk_box_pack_start(GTK_BOX(caja), btn_cerrar, FALSE, FALSE, 0);
 
     g_signal_connect(btn_generar, "clicked", G_CALLBACK(on_generar_reporte_clicked), ctx);
+    g_signal_connect(ctx->btn_guardar, "clicked", G_CALLBACK(on_guardar_como_reporte_clicked), ctx);
     g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
@@ -2699,6 +3063,18 @@ static void on_alertas_clicked(GtkButton *boton, gpointer datos) {
     abrir_pantalla_alertas(d->ventana_principal, d->rol);
 }
 
+static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    (void)datos;
+    GError *error = NULL;
+    gboolean ok = g_spawn_command_line_async(
+        "x-terminal-emulator -e /usr/local/bin/pawos-actualizar-gui", &error);
+    if (!ok) {
+        g_warning("No se pudo abrir el actualizador: %s", error ? error->message : "error desconocido");
+        if (error) g_error_free(error);
+    }
+}
+
 static void construir_ventana_principal(Rol rol, const char *usuario) {
     GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ventana), "PawOS Refugio");
@@ -2720,6 +3096,14 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='x-large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
     gtk_widget_set_halign(titulo, GTK_ALIGN_CENTER);
     gtk_box_pack_start(GTK_BOX(banner), titulo, FALSE, FALSE, 0);
+
+    GtkWidget *lbl_version = gtk_label_new(NULL);
+    gchar *markup_version = g_strdup_printf("<span size='small'>v%s</span>", PAWOS_VERSION);
+    gtk_label_set_markup(GTK_LABEL(lbl_version), markup_version);
+    g_free(markup_version);
+    gtk_widget_set_halign(lbl_version, GTK_ALIGN_CENTER);
+    gtk_style_context_add_class(gtk_widget_get_style_context(lbl_version), "subtitulo-banner");
+    gtk_box_pack_start(GTK_BOX(banner), lbl_version, FALSE, FALSE, 0);
 
     GtkWidget *fila_usuario = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(fila_usuario, GTK_ALIGN_CENTER);
@@ -2820,6 +3204,13 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
             gtk_widget_set_tooltip_text(boton, "Requiere rol Administrador.");
         }
     }
+
+    GtkWidget *btn_actualizar = gtk_button_new_with_label("\xF0\x9F\x94\x84  Buscar Actualizaciones");
+    gtk_widget_set_size_request(btn_actualizar, 250, 46);
+    gtk_widget_set_halign(btn_actualizar, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text(btn_actualizar, "Busca la ultima version en GitHub y la instala.");
+    gtk_box_pack_start(GTK_BOX(caja), btn_actualizar, FALSE, FALSE, 0);
+    g_signal_connect(btn_actualizar, "clicked", G_CALLBACK(on_actualizar_clicked), NULL);
 
     GtkWidget *btn_salir = gtk_button_new_with_label("Salir");
     gtk_style_context_add_class(gtk_widget_get_style_context(btn_salir), "salir");
