@@ -101,5 +101,10 @@ int  nota_veterinario_listar(NotaVeterinario **out, int *n); /* todas, mas recie
 
 /* ---------- Reportes ---------- */
 int reporte_generar(const char *ruta_salida);
+int reporte_generar_mascotas(const char *ruta_salida);
+int reporte_generar_vacunas(const char *ruta_salida);
+int reporte_generar_adopciones(const char *ruta_salida);
+int reporte_generar_donantes(const char *ruta_salida);
+int reporte_generar_alertas(const char *ruta_salida);
 
 #endif

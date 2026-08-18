@@ -666,3 +666,156 @@ int reporte_generar(const char *ruta_salida) {
     fclose(f);
     return 0;
 }
+
+
+/* ---------------- Reportes por categoria (agregado) ---------------- */
+
+int reporte_generar_mascotas(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Mascotas - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Mascota *ms; int nm;
+    mascota_listar(&ms, &nm);
+    int disponibles = 0, adoptados = 0, en_proceso = 0, tratamiento = 0;
+    for (int i = 0; i < nm; i++) {
+        if (!strcmp(ms[i].estado, "disponible")) disponibles++;
+        else if (!strcmp(ms[i].estado, "adoptado")) adoptados++;
+        else if (!strcmp(ms[i].estado, "en_proceso")) en_proceso++;
+        else if (!strcmp(ms[i].estado, "tratamiento")) tratamiento++;
+    }
+    fprintf(f, "Total registradas : %d\n", nm);
+    fprintf(f, "Disponibles        : %d\n", disponibles);
+    fprintf(f, "En proceso adopcion: %d\n", en_proceso);
+    fprintf(f, "Adoptadas          : %d\n", adoptados);
+    fprintf(f, "En tratamiento     : %d\n\n", tratamiento);
+
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < nm; i++) {
+        fprintf(f, "  #%d %s - %s (%s), %d anios, estado: %s, ingreso: %s\n",
+                ms[i].id, ms[i].nombre, ms[i].especie, ms[i].raza, ms[i].edad,
+                ms[i].estado, ms[i].fecha_ingreso);
+    }
+    free(ms);
+
+    fclose(f);
+    return 0;
+}
+
+int reporte_generar_vacunas(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Vacunas - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Vacuna *v; int nv;
+    vacuna_listar(&v, &nv);
+    fprintf(f, "Total de vacunas registradas: %d\n\n", nv);
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < nv; i++) {
+        fprintf(f, "  Mascota #%d - %s | aplicada: %s | proxima: %s%s%s\n",
+                v[i].mascota_id, v[i].nombre_vacuna, v[i].fecha_aplicacion, v[i].fecha_proxima,
+                v[i].observaciones[0] ? " | obs: " : "", v[i].observaciones[0] ? v[i].observaciones : "");
+    }
+    free(v);
+
+    fclose(f);
+    return 0;
+}
+
+int reporte_generar_adopciones(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Adopciones - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Adopcion *a; int na;
+    adopcion_listar(&a, &na);
+    fprintf(f, "Total de adopciones registradas: %d\n\n", na);
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < na; i++) {
+        fprintf(f, "  Mascota #%d -> %s (contacto: %s), fecha: %s\n",
+                a[i].mascota_id, a[i].adoptante_nombre, a[i].adoptante_contacto, a[i].fecha_adopcion);
+    }
+    free(a);
+
+    fclose(f);
+    return 0;
+}
+
+int reporte_generar_donantes(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Donantes - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Donante *d; int nd;
+    donante_listar(&d, &nd);
+    double total = donante_total_recaudado();
+    fprintf(f, "Total de donantes registrados: %d\n", nd);
+    fprintf(f, "Total recaudado: %.2f\n\n", total);
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < nd; i++) {
+        fprintf(f, "  %s (contacto: %s) - Q%.2f - fecha: %s\n",
+                d[i].nombre, d[i].contacto, d[i].monto, d[i].fecha);
+    }
+    free(d);
+
+    fclose(f);
+    return 0;
+}
+
+int reporte_generar_alertas(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Alertas de Sensores - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Alerta *al; int nal;
+    alerta_listar(&al, &nal);
+    int pendientes = 0;
+    for (int i = 0; i < nal; i++) if (!al[i].atendida) pendientes++;
+    fprintf(f, "Total de alertas registradas: %d\n", nal);
+    fprintf(f, "Pendientes: %d\n\n", pendientes);
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < nal; i++) {
+        fprintf(f, "  [%s] animal %s - %s: %s (valor: %.2f) - %s\n",
+                al[i].fecha_hora, al[i].animal_id, al[i].tipo, al[i].detalle, al[i].valor,
+                al[i].atendida ? "atendida" : "pendiente");
+    }
+    free(al);
+
+    fclose(f);
+    return 0;
+}
