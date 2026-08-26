@@ -1,0 +1,7 @@
+
+[Desktop Entry]
+Type=Application
+Name=PawOS Refugio (GUI)
+Exec=/usr/local/bin/pawos-refugio-gui
+Terminal=false
+Icon=utilities-terminal

@@ -1,0 +1,43 @@
+
+#!/bin/bash
+set -e
+REMOTE_BASE="ggdrive:"
+REMOTE="${REMOTE_BASE}PawOS_Backups"
+ARCHIVO="$1"
+if [ -z "$ARCHIVO" ]; then
+    echo "Uso: pawos-restaurar-nube <archivo>"
+    exit 1
+fi
+case "$ARCHIVO" in
+    pawos_*.db) ;;
+    *) echo "ERROR: nombre de archivo invalido."; exit 1 ;;
+esac
+ID=$(rclone lsjson "$REMOTE" 2>/dev/null | python3 -c '
+import json, sys
+archivo = sys.argv[1]
+try:
+    datos = json.load(sys.stdin)
+except Exception:
+    datos = []
+filas = [d for d in datos if not d.get("IsDir") and d.get("Name") == archivo]
+filas.sort(key=lambda d: d.get("ModTime", ""), reverse=True)
+if filas:
+    print(filas[0].get("ID", ""))
+' "$ARCHIVO")
+
+if [ -z "$ID" ]; then
+    echo "ERROR: no se encontro '$ARCHIVO' en Google Drive."
+    exit 1
+fi
+
+mkdir -p /var/pawos
+if [ -f /var/pawos/pawos.db ]; then
+    cp /var/pawos/pawos.db "/var/pawos/pawos.db.antes-de-restaurar.$(date +%Y%m%d_%H%M%S)"
+fi
+TMP="/var/pawos/pawos.db.restaurando.tmp"
+rm -f "$TMP"
+rclone backend copyid "$REMOTE_BASE" "$ID" "$TMP"
+mv "$TMP" /var/pawos/pawos.db
+chown root:pawos-refugio /var/pawos/pawos.db
+chmod 660 /var/pawos/pawos.db
+echo "[$(date)] Base de datos restaurada desde $ARCHIVO (id $ID)"

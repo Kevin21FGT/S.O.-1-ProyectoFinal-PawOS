@@ -11,6 +11,7 @@
  * tabla alertas_sensores via alerta_registrar(), la misma que usa el
  * modulo "Alertas de Sensores" de la GUI y del CLI.
  */
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,10 +21,16 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/statvfs.h>
+#include <crypt.h>
 #include "db.h"
 #define PUERTO 8080
 #define USUARIO "admin"
-#define CONTRASENA "pawos2026"
+/* Antes esta contrasena estaba en texto plano directamente aca
+ * (CONTRASENA "pawos2026"), visible con solo leer el codigo fuente.
+ * Ahora se guarda su hash (crypt(), SHA-512); la contrasena real
+ * (que sigue siendo "pawos2026", no cambia para quien ya la usa) se
+ * verifica con crypt(), nunca se compara ni se guarda tal cual. */
+#define CONTRASENA_HASH "$6$VPNlboGKpYNHj4Rd$rj.6acG/RpMhlSJlJwTLaNwOMam.VOVmg9KiDqKw1Zeq6GVsSuQDfEk0IsSQUd23.4YiIoxK9qTZxJaquchJG."
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
 #define TAM_BUF_PETICION 4096
 
@@ -132,7 +139,21 @@ static int autorizado(const char *peticion) {
     unsigned char decodificado[256];
     int n = base64_decode(token, decodificado, sizeof(decodificado) - 1);
     decodificado[n] = '\0';
-    return strcmp((char *)decodificado, USUARIO ":" CONTRASENA) == 0;
+
+    /* decodificado trae "usuario:contrasena". Se separan en el primer
+     * ":" para comparar cada parte por separado: el usuario en texto
+     * plano (no es secreto), la contrasena contra su hash (nunca se
+     * guarda ni se compara en texto plano). */
+    char *dos_puntos = strchr((char *)decodificado, ':');
+    if (!dos_puntos) return 0;
+    *dos_puntos = '\0';
+    const char *usuario_ingresado = (char *)decodificado;
+    const char *password_ingresado = dos_puntos + 1;
+
+    if (strcmp(usuario_ingresado, USUARIO) != 0) return 0;
+
+    char *resultado = crypt(password_ingresado, CONTRASENA_HASH);
+    return resultado && strcmp(resultado, CONTRASENA_HASH) == 0;
 }
 static void generar_pagina(char *buf, size_t bufsize) {
     long mem_total, mem_disp;

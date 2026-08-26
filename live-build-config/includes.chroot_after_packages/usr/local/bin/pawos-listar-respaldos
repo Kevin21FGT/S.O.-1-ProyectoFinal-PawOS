@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+REMOTE="ggdrive:PawOS_Backups"
+rclone lsjson "$REMOTE" 2>/dev/null | python3 -c '
+import json, re, sys
+from datetime import datetime
+
+try:
+    datos = json.load(sys.stdin)
+except Exception:
+    datos = []
+filas = [d for d in datos
+         if not d.get("IsDir") and d.get("Name", "").startswith("pawos_")
+         and d.get("Name", "").endswith(".db")]
+filas.sort(key=lambda d: d.get("ModTime", ""), reverse=True)
+patron = re.compile(r"^pawos_\d{8}_\d{6}_\d{3}(?:_(.+))?\.db$")
+
+for d in filas:
+    modtime = d.get("ModTime", "")
+    try:
+        dt = datetime.fromisoformat(modtime.replace("Z", "+00:00"))
+        fecha = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        fecha = modtime
+    tam = d.get("Size", 0)
+    nombre = d.get("Name", "")
+    m = patron.match(nombre)
+    etiqueta = m.group(1) if (m and m.group(1)) else ""
+    print(f"{fecha}\t{tam}\t{nombre}\t{etiqueta}")
+'

@@ -29,6 +29,6 @@ live-build-config/wget-log*
 live-build-config/pawos.transfer
 
 live-build-config/chroot.packages*
-pawos-refugio-gui
+/pawos-refugio-gui
 *.bak
 *.o

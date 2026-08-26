@@ -1,0 +1,8 @@
+[Unit]
+Description=PawOS - Respaldo a la nube (Google Drive via rclone)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pawos-backup-nube
