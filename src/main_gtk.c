@@ -3108,7 +3108,7 @@ static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
         "  git fetch origin \"$RAMA\" >/dev/null 2>&1 || { echo SIN_CONEXION; exit 0; }; "
         "  LOCAL=$(git rev-parse HEAD); REMOTE=$(git rev-parse origin/$RAMA); "
         "  if [ \"$LOCAL\" = \"$REMOTE\" ]; then echo AL_DIA; "
-        "  else echo HAY_CAMBIOS; git log \"$LOCAL..$REMOTE\" --pretty=format:%s; fi; "
+        "  else echo HAY_CAMBIOS; git log \"$LOCAL..$REMOTE\" --no-merges --pretty=format:%s; fi; "
         "else echo PRIMERA_VEZ; fi'";
 
     gboolean ok = g_spawn_command_line_sync(comando, &salida, &error_salida, &estado_salida, &error);
