@@ -1,0 +1,7 @@
+#!/bin/bash
+# 0140-aplicar-dconf.hook.chroot - Compila las bases de dconf (fondo
+# de escritorio, fondo de la pantalla de login GDM) para que los
+# archivos de configuracion en /etc/dconf/db/*.d/ realmente tengan
+# efecto. Sin este paso, esos archivos quedan ahi sin hacer nada.
+set -e
+dconf update

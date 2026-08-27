@@ -1,0 +1,7 @@
+
+[Desktop Entry]
+Type=Application
+Name=Apagar PawOS
+Exec=sudo /sbin/poweroff
+Terminal=false
+Icon=system-shutdown

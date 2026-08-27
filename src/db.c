@@ -5,11 +5,14 @@
  * alertas de sensores pasan por aqui. El resto del programa (menus
  * ncurses, o la interfaz grafica) no toca SQL directamente.
  */
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <crypt.h>
 #include "../include/db.h"
 
 static sqlite3 *g_db = NULL;
@@ -71,6 +74,29 @@ static const char *SCHEMA =
     "  atendida INTEGER NOT NULL DEFAULT 0"
     ");";
 
+/* Genera un hash de una contrasena en texto plano usando crypt() con
+ * SHA-512 (prefijo "$6$") y una sal aleatoria nueva cada vez. 'out'
+ * debe tener al menos 128 bytes. Se usa tanto para sembrar los
+ * usuarios por defecto como para migrar contrasenas viejas guardadas
+ * en texto plano (ver mas abajo) - nunca se guarda ni se compara la
+ * contrasena tal cual en la base de datos. */
+static void pawos_hash_password(const char *plano, char *out, size_t out_len) {
+    static int sembrado = 0;
+    if (!sembrado) {
+        srand((unsigned)time(NULL) ^ (unsigned)getpid());
+        sembrado = 1;
+    }
+    static const char alfabeto[] =
+        "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    char sal[20] = "$6$";
+    for (int i = 0; i < 16; i++) {
+        sal[3 + i] = alfabeto[rand() % (int)(sizeof(alfabeto) - 1)];
+    }
+    sal[19] = '\0';
+    char *resultado = crypt(plano, sal);
+    snprintf(out, out_len, "%s", resultado ? resultado : "");
+}
+
 int db_init(const char *ruta) {
     if (sqlite3_open(ruta, &g_db) != SQLITE_OK) {
         fprintf(stderr, "No se pudo abrir la base de datos: %s\n", sqlite3_errmsg(g_db));
@@ -83,12 +109,60 @@ int db_init(const char *ruta) {
         return -1;
     }
     sqlite3_exec(g_db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL);
-    sqlite3_exec(g_db,
-        "INSERT OR IGNORE INTO usuarios (username, password, rol) VALUES "
-        "('admin_refugio','admin123',0),"
-        "('veterinario1','vet123',1),"
-        "('voluntario1','vol123',2);",
-        NULL, NULL, NULL);
+
+    /* Semilla de usuarios por defecto: mismos usuarios y mismas
+     * contrasenas de siempre (admin123/vet123/vol123), pero ahora se
+     * guardan como hash (crypt(), SHA-512), nunca en texto plano.
+     * "INSERT OR IGNORE" sigue funcionando igual que antes: si el
+     * usuario ya existe (username es UNIQUE), no hace nada. */
+    {
+        struct { const char *user; const char *pass; int rol; } semilla[] = {
+            {"admin_refugio", "admin123", 0},
+            {"veterinario1",  "vet123",   1},
+            {"voluntario1",   "vol123",   2},
+        };
+        const char *sql_seed =
+            "INSERT OR IGNORE INTO usuarios (username, password, rol) VALUES (?,?,?);";
+        for (size_t i = 0; i < sizeof(semilla) / sizeof(semilla[0]); i++) {
+            char hash[128];
+            pawos_hash_password(semilla[i].pass, hash, sizeof(hash));
+            sqlite3_stmt *st;
+            if (sqlite3_prepare_v2(g_db, sql_seed, -1, &st, NULL) == SQLITE_OK) {
+                sqlite3_bind_text(st, 1, semilla[i].user, -1, SQLITE_STATIC);
+                sqlite3_bind_text(st, 2, hash, -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(st, 3, semilla[i].rol);
+                sqlite3_step(st);
+                sqlite3_finalize(st);
+            }
+        }
+    }
+
+    /* Migracion aditiva: si la base de datos ya existia de una version
+     * anterior de PawOS con contrasenas en texto plano (los hashes de
+     * crypt() siempre empiezan con "$"), las convierte a hash ahora
+     * mismo, sin pedirle nada al usuario ni perder ninguna cuenta. */
+    {
+        sqlite3_stmt *st;
+        if (sqlite3_prepare_v2(g_db, "SELECT id, password FROM usuarios;", -1, &st, NULL) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                int id = sqlite3_column_int(st, 0);
+                const unsigned char *pass_actual = sqlite3_column_text(st, 1);
+                if (pass_actual && pass_actual[0] != '\0' && pass_actual[0] != '$') {
+                    char hash[128];
+                    pawos_hash_password((const char *)pass_actual, hash, sizeof(hash));
+                    sqlite3_stmt *upd;
+                    if (sqlite3_prepare_v2(g_db, "UPDATE usuarios SET password=? WHERE id=?;", -1, &upd, NULL) == SQLITE_OK) {
+                        sqlite3_bind_text(upd, 1, hash, -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_int(upd, 2, id);
+                        sqlite3_step(upd);
+                        sqlite3_finalize(upd);
+                    }
+                }
+            }
+            sqlite3_finalize(st);
+        }
+    }
+
     /* Migracion aditiva: si la base de datos ya existia de una version
      * anterior de PawOS (tabla vacunas sin la columna observaciones), la
      * agrega ahora. Si la columna ya existe (bases nuevas, creadas ya con
@@ -105,15 +179,25 @@ void db_close(void) {
 }
 
 int usuario_autenticar(const char *username, const char *password, int *rol_out) {
-    const char *sql = "SELECT rol FROM usuarios WHERE username=? AND password=?;";
+    /* Ya no se compara la contrasena dentro del SQL (WHERE password=?):
+     * se trae el hash guardado para ese usuario y se compara aca,
+     * usando crypt() (que extrae la sal del propio hash guardado y
+     * recalcula, sin necesitar guardarla aparte). */
+    const char *sql = "SELECT rol, password FROM usuarios WHERE username=?;";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_text(st, 1, username, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 2, password, -1, SQLITE_STATIC);
     int ok = -1;
     if (sqlite3_step(st) == SQLITE_ROW) {
-        if (rol_out) *rol_out = sqlite3_column_int(st, 0);
-        ok = 0;
+        int rol = sqlite3_column_int(st, 0);
+        const unsigned char *hash_guardado = sqlite3_column_text(st, 1);
+        if (hash_guardado) {
+            char *resultado = crypt(password, (const char *)hash_guardado);
+            if (resultado && strcmp(resultado, (const char *)hash_guardado) == 0) {
+                if (rol_out) *rol_out = rol;
+                ok = 0;
+            }
+        }
     }
     sqlite3_finalize(st);
     return ok;
@@ -577,6 +661,159 @@ int reporte_generar(const char *ruta_salida) {
     fprintf(f, "\n-- Alertas de sensores pendientes: %d --\n", nal);
     for (int i = 0; i < nal; i++)
         fprintf(f, "  [%s] %s - %s (valor: %.2f)\n", al[i].fecha_hora, al[i].tipo, al[i].detalle, al[i].valor);
+    free(al);
+
+    fclose(f);
+    return 0;
+}
+
+
+/* ---------------- Reportes por categoria (agregado) ---------------- */
+
+int reporte_generar_mascotas(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Mascotas - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Mascota *ms; int nm;
+    mascota_listar(&ms, &nm);
+    int disponibles = 0, adoptados = 0, en_proceso = 0, tratamiento = 0;
+    for (int i = 0; i < nm; i++) {
+        if (!strcmp(ms[i].estado, "disponible")) disponibles++;
+        else if (!strcmp(ms[i].estado, "adoptado")) adoptados++;
+        else if (!strcmp(ms[i].estado, "en_proceso")) en_proceso++;
+        else if (!strcmp(ms[i].estado, "tratamiento")) tratamiento++;
+    }
+    fprintf(f, "Total registradas : %d\n", nm);
+    fprintf(f, "Disponibles        : %d\n", disponibles);
+    fprintf(f, "En proceso adopcion: %d\n", en_proceso);
+    fprintf(f, "Adoptadas          : %d\n", adoptados);
+    fprintf(f, "En tratamiento     : %d\n\n", tratamiento);
+
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < nm; i++) {
+        fprintf(f, "  #%d %s - %s (%s), %d anios, estado: %s, ingreso: %s\n",
+                ms[i].id, ms[i].nombre, ms[i].especie, ms[i].raza, ms[i].edad,
+                ms[i].estado, ms[i].fecha_ingreso);
+    }
+    free(ms);
+
+    fclose(f);
+    return 0;
+}
+
+int reporte_generar_vacunas(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Vacunas - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Vacuna *v; int nv;
+    vacuna_listar(&v, &nv);
+    fprintf(f, "Total de vacunas registradas: %d\n\n", nv);
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < nv; i++) {
+        fprintf(f, "  Mascota #%d - %s | aplicada: %s | proxima: %s%s%s\n",
+                v[i].mascota_id, v[i].nombre_vacuna, v[i].fecha_aplicacion, v[i].fecha_proxima,
+                v[i].observaciones[0] ? " | obs: " : "", v[i].observaciones[0] ? v[i].observaciones : "");
+    }
+    free(v);
+
+    fclose(f);
+    return 0;
+}
+
+int reporte_generar_adopciones(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Adopciones - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Adopcion *a; int na;
+    adopcion_listar(&a, &na);
+    fprintf(f, "Total de adopciones registradas: %d\n\n", na);
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < na; i++) {
+        fprintf(f, "  Mascota #%d -> %s (contacto: %s), fecha: %s\n",
+                a[i].mascota_id, a[i].adoptante_nombre, a[i].adoptante_contacto, a[i].fecha_adopcion);
+    }
+    free(a);
+
+    fclose(f);
+    return 0;
+}
+
+int reporte_generar_donantes(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Donantes - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Donante *d; int nd;
+    donante_listar(&d, &nd);
+    double total = donante_total_recaudado();
+    fprintf(f, "Total de donantes registrados: %d\n", nd);
+    fprintf(f, "Total recaudado: %.2f\n\n", total);
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < nd; i++) {
+        fprintf(f, "  %s (contacto: %s) - Q%.2f - fecha: %s\n",
+                d[i].nombre, d[i].contacto, d[i].monto, d[i].fecha);
+    }
+    free(d);
+
+    fclose(f);
+    return 0;
+}
+
+int reporte_generar_alertas(const char *ruta_salida) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(f, "===== Reporte de Alertas de Sensores - PawOS =====\n");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Alerta *al; int nal;
+    alerta_listar(&al, &nal);
+    int pendientes = 0;
+    for (int i = 0; i < nal; i++) if (!al[i].atendida) pendientes++;
+    fprintf(f, "Total de alertas registradas: %d\n", nal);
+    fprintf(f, "Pendientes: %d\n\n", pendientes);
+    fprintf(f, "-- Detalle --\n");
+    for (int i = 0; i < nal; i++) {
+        fprintf(f, "  [%s] animal %s - %s: %s (valor: %.2f) - %s\n",
+                al[i].fecha_hora, al[i].animal_id, al[i].tipo, al[i].detalle, al[i].valor,
+                al[i].atendida ? "atendida" : "pendiente");
+    }
     free(al);
 
     fclose(f);

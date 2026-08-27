@@ -3,7 +3,7 @@ CC      = gcc
 NASM    = nasm
 CFLAGS  = -Wall -Wextra -std=c11 -D_DEFAULT_SOURCE -Iinclude
 NASMFLAGS = -f elf64
-LDFLAGS = -lncurses -lsqlite3 -lm
+LDFLAGS = -lncurses -lsqlite3 -lm -lcrypt
 
 SRC = src/main.c src/db.c src/ui.c src/auth.c src/pantallas.c src/procesos.c src/pantalla_procesos.c src/memoria.c src/pantalla_memoria.c src/pantalla_login.c src/archivos.c src/pantalla_archivos.c src/integridad.c
 OBJ = $(SRC:.c=.o)
@@ -26,10 +26,10 @@ all: $(BIN) $(DEMONIO_BIN) $(MONITOR_BIN)
 $(BIN): $(OBJ) $(ASM_OBJ)
 	$(CC) $(OBJ) $(ASM_OBJ) -o $(BIN) $(LDFLAGS)
 $(DEMONIO_BIN): $(DEMONIO_OBJ)
-	$(CC) $(DEMONIO_OBJ) -o $(DEMONIO_BIN) -lsqlite3 -lm
+	$(CC) $(DEMONIO_OBJ) -o $(DEMONIO_BIN) -lsqlite3 -lm -lcrypt
 
 $(MONITOR_BIN): $(MONITOR_OBJ)
-	$(CC) $(MONITOR_OBJ) -o $(MONITOR_BIN) -lsqlite3 -lm
+	$(CC) $(MONITOR_OBJ) -o $(MONITOR_BIN) -lsqlite3 -lm -lcrypt
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -54,7 +54,7 @@ GTK_LIBS   = $(shell pkg-config --libs gtk+-3.0)
 GUI_BIN = pawos-refugio-gui
 
 gui: src/main_gtk.c src/db.c src/auth.c src/procesos.c src/memoria.c
-	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db.c src/auth.c src/procesos.c src/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db.c src/auth.c src/procesos.c src/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt
 
 clean-gui:
 	rm -f $(GUI_BIN)
