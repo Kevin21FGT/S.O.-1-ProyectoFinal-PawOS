@@ -34,10 +34,10 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
-#include "../include/db.h"
-#include "../include/auth.h"
-#include "../include/procesos.h"
-#include "../include/memoria.h"
+#include "db/db.h"
+#include "auth/auth.h"
+#include "procesos/procesos.h"
+#include "memoria/memoria.h"
 #include "../include/version.h"
 
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"

@@ -2,7 +2,7 @@
 #include <ncurses.h>
 #include <string.h>
 #include "pantalla_login.h"
-#include "db.h"
+#include "db/db.h"
 
 static void pedir_texto_login(int fila, int col, const char *etiqueta, char *out, int maxlen) {
     echo();

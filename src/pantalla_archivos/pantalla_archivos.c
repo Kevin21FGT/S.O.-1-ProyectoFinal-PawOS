@@ -2,9 +2,9 @@
 #include <ncurses.h>
 #include <string.h>
 #include <stdlib.h>
-#include "../include/pantalla_archivos.h"
-#include "../include/archivos.h"
-#include "../include/ui.h"
+#include "pantalla_archivos.h"
+#include "archivos/archivos.h"
+#include "ui/ui.h"
 
 static void ver_categoria_pantalla(const char *categoria) {
     ArchivoInfo *lista; int n;

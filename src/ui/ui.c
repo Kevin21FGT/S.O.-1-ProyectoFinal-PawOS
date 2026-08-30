@@ -5,7 +5,7 @@
 #include <ncurses.h>
 #include <string.h>
 #include <stdlib.h>
-#include "../include/ui.h"
+#include "ui.h"
 
 /* Barra superior solida (todo el ancho) con el titulo centrado,
  * mas los bordes laterales y las lineas que cierran arriba/abajo. */

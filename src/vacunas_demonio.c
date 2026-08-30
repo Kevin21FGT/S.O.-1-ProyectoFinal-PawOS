@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include "../include/db.h"
+#include "db/db.h"
 
 #define RUTA_BD_DEFECTO  "/var/pawos/pawos.db"
 #define RUTA_LOG_DEFECTO "/var/pawos/archivos/reportes/alertas_vacunas.log"

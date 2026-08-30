@@ -13,7 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <crypt.h>
-#include "../include/db.h"
+#include "db.h"
 
 static sqlite3 *g_db = NULL;
 

@@ -13,7 +13,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <time.h>
-#include "../include/archivos.h"
+#include "archivos.h"
 const char *ARCHIVOS_CATEGORIAS[ARCHIVOS_NUM_CATEGORIAS] = {
     "mascotas", "vacunas", "adopciones", "donantes", "reportes", "backups"
 };

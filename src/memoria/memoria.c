@@ -1,4 +1,4 @@
-#include "../include/memoria.h"
+#include "memoria.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
