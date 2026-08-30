@@ -7,10 +7,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
-#include "../include/pantallas.h"
-#include "../include/ui.h"
-#include "../include/db.h"
-#include "../include/integridad.h"
+#include "pantallas.h"
+#include "ui/ui.h"
+#include "db/db.h"
+#include "integridad/integridad.h"
 static void hoy(char *buf, int len) {
     time_t t = time(NULL);
     struct tm tmv; localtime_r(&t, &tmv);

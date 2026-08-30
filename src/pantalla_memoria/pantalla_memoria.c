@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "pantalla_memoria.h"
-#include "memoria.h"
+#include "memoria/memoria.h"
 
 #define ID_PROCESO_DEMO 1
 
