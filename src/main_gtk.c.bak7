@@ -3391,8 +3391,6 @@ typedef struct {
     GtkWidget    *treeview;
     GtkListStore *store;
     char          nombre_cliente[64];
-    int           id_cliente;
-    RolCliente    rol;
 } ContextoCliente;
 
 static void cargar_mascotas_disponibles(ContextoCliente *ctx) {
@@ -3527,123 +3525,9 @@ static void on_hacer_donacion_clicked(GtkButton *boton, gpointer datos) {
     gtk_widget_destroy(dialogo);
 }
 
-/* Ver mis solicitudes: solo Supervisor y Administrador (de Cliente).
- * Filtra las adopciones/donaciones ya existentes por nombre, buscando
- * las que coinciden con el nombre de este cliente. */
-static void on_ver_mis_solicitudes_clicked(GtkButton *boton, gpointer datos) {
-    (void)boton;
-    ContextoCliente *ctx = (ContextoCliente *)datos;
-
-    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
-        "Mis solicitudes", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
-        "_Cerrar", GTK_RESPONSE_CLOSE, NULL);
-    gtk_window_set_default_size(GTK_WINDOW(dialogo), 420, 360);
-
-    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
-    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_widget_set_vexpand(scroll, TRUE);
-    gtk_container_set_border_width(GTK_CONTAINER(scroll), 10);
-    gtk_container_add(GTK_CONTAINER(area), scroll);
-
-    GtkWidget *lbl = gtk_label_new(NULL);
-    gtk_label_set_line_wrap(GTK_LABEL(lbl), TRUE);
-    gtk_widget_set_halign(lbl, GTK_ALIGN_START);
-    gtk_widget_set_valign(lbl, GTK_ALIGN_START);
-    gtk_container_add(GTK_CONTAINER(scroll), lbl);
-
-    GString *texto = g_string_new(NULL);
-    g_string_append(texto, "<b>Adopciones solicitadas:</b>\n");
-    Adopcion *ads; int n_ads;
-    if (adopcion_listar(&ads, &n_ads) == 0) {
-        int encontradas = 0;
-        for (int i = 0; i < n_ads; i++) {
-            if (g_strcmp0(ads[i].adoptante_nombre, ctx->nombre_cliente) == 0) {
-                gchar *linea = g_markup_printf_escaped(
-                    "  - Mascota #%d, %s\n", ads[i].mascota_id, ads[i].fecha_adopcion);
-                g_string_append(texto, linea);
-                g_free(linea);
-                encontradas++;
-            }
-        }
-        if (encontradas == 0) g_string_append(texto, "  (ninguna todavia)\n");
-        free(ads);
-    }
-
-    g_string_append(texto, "\n<b>Donaciones:</b>\n");
-    Donante *ds; int n_ds;
-    if (donante_listar(&ds, &n_ds) == 0) {
-        int encontradas = 0;
-        for (int i = 0; i < n_ds; i++) {
-            if (g_strcmp0(ds[i].nombre, ctx->nombre_cliente) == 0) {
-                gchar *linea = g_markup_printf_escaped(
-                    "  - $%.2f, %s\n", ds[i].monto, ds[i].fecha);
-                g_string_append(texto, linea);
-                g_free(linea);
-                encontradas++;
-            }
-        }
-        if (encontradas == 0) g_string_append(texto, "  (ninguna todavia)\n");
-        free(ds);
-    }
-
-    gtk_label_set_markup(GTK_LABEL(lbl), texto->str);
-    g_string_free(texto, TRUE);
-
-    gtk_widget_show_all(dialogo);
-    gtk_dialog_run(GTK_DIALOG(dialogo));
-    gtk_widget_destroy(dialogo);
-}
-
-/* Editar mi cuenta: solo Administrador (de Cliente). Cambia nombre y,
- * opcionalmente, contrasena (si se deja en blanco, no se toca). */
-static void on_editar_cuenta_clicked(GtkButton *boton, gpointer datos) {
-    (void)boton;
-    ContextoCliente *ctx = (ContextoCliente *)datos;
-
-    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
-        "Editar mi cuenta", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
-        "_Cancelar", GTK_RESPONSE_CANCEL,
-        "_Guardar", GTK_RESPONSE_OK, NULL);
-    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
-    GtkWidget *cuadricula = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(cuadricula), 8);
-    gtk_grid_set_column_spacing(GTK_GRID(cuadricula), 10);
-    gtk_container_set_border_width(GTK_CONTAINER(cuadricula), 12);
-
-    GtkWidget *e_nombre = gtk_entry_new();
-    gtk_entry_set_text(GTK_ENTRY(e_nombre), ctx->nombre_cliente);
-    GtkWidget *e_password = gtk_entry_new();
-    gtk_entry_set_visibility(GTK_ENTRY(e_password), FALSE);
-    gtk_entry_set_input_purpose(GTK_ENTRY(e_password), GTK_INPUT_PURPOSE_PASSWORD);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(e_password), "(dejar en blanco para no cambiarla)");
-
-    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nombre:"), 0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(cuadricula), e_nombre, 1, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nueva contrasena:"), 0, 1, 1, 1);
-    gtk_grid_attach(GTK_GRID(cuadricula), e_password, 1, 1, 1, 1);
-
-    gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
-
-    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
-        const char *nombre_nuevo = gtk_entry_get_text(GTK_ENTRY(e_nombre));
-        const char *password_nueva = gtk_entry_get_text(GTK_ENTRY(e_password));
-        if (nombre_nuevo[0] && cliente_actualizar(ctx->id_cliente, nombre_nuevo, password_nueva) == 0) {
-            snprintf(ctx->nombre_cliente, sizeof(ctx->nombre_cliente), "%s", nombre_nuevo);
-            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Cuenta actualizada.", FALSE);
-        } else {
-            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo actualizar la cuenta.", TRUE);
-        }
-    }
-    gtk_widget_destroy(dialogo);
-}
-
-static void construir_ventana_cliente(const Cliente *cliente) {
+static void construir_ventana_cliente(const char *nombre_cliente) {
     ContextoCliente *ctx = g_malloc0(sizeof(ContextoCliente));
-    snprintf(ctx->nombre_cliente, sizeof(ctx->nombre_cliente), "%s", cliente->nombre);
-    ctx->id_cliente = cliente->id;
-    ctx->rol = cliente->rol;
+    snprintf(ctx->nombre_cliente, sizeof(ctx->nombre_cliente), "%s", nombre_cliente);
 
     ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS Refugio - Acceso de Clientes");
@@ -3654,8 +3538,7 @@ static void construir_ventana_cliente(const Cliente *cliente) {
     gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
 
     gchar *texto_bienvenida = g_strdup_printf(
-        "<span size='large' weight='bold'>\xC2\xA1Hola, %s!</span> (%s)",
-        ctx->nombre_cliente, cliente_rol_nombre(ctx->rol));
+        "<span size='large' weight='bold'>\xC2\xA1Hola, %s!</span>", ctx->nombre_cliente);
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), texto_bienvenida);
     g_free(texto_bienvenida);
@@ -3697,18 +3580,6 @@ static void construir_ventana_cliente(const Cliente *cliente) {
     gtk_box_pack_start(GTK_BOX(fila_botones), btn_refrescar, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(fila_botones), btn_adoptar, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(fila_botones), btn_donar, FALSE, FALSE, 0);
-
-    if (ctx->rol >= ROL_CLIENTE_SUPERVISOR) {
-        GtkWidget *btn_historial = gtk_button_new_with_label("Ver mis solicitudes");
-        gtk_box_pack_start(GTK_BOX(fila_botones), btn_historial, FALSE, FALSE, 0);
-        g_signal_connect(btn_historial, "clicked", G_CALLBACK(on_ver_mis_solicitudes_clicked), ctx);
-    }
-    if (ctx->rol >= ROL_CLIENTE_ADMIN) {
-        GtkWidget *btn_editar = gtk_button_new_with_label("Editar mi cuenta");
-        gtk_box_pack_start(GTK_BOX(fila_botones), btn_editar, FALSE, FALSE, 0);
-        g_signal_connect(btn_editar, "clicked", G_CALLBACK(on_editar_cuenta_clicked), ctx);
-    }
-
     gtk_box_pack_end(GTK_BOX(fila_botones), btn_salir, FALSE, FALSE, 0);
 
     g_signal_connect(btn_refrescar, "clicked", G_CALLBACK(on_refrescar_mascotas_cliente_clicked), ctx);
@@ -3725,7 +3596,7 @@ static void construir_ventana_cliente(const Cliente *cliente) {
 /* Formulario para crear una cuenta de Cliente nueva (correo, nombre,
  * contrasena), llamado desde el boton "Registrarme" del login de
  * clientes. Devuelve TRUE y llena nombre_out si se creo la cuenta. */
-static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
+static gboolean mostrar_registro_cliente(char *nombre_out, size_t nombre_len) {
     GtkWidget *dialogo = gtk_dialog_new_with_buttons(
         "Crear cuenta de Cliente", NULL, GTK_DIALOG_MODAL,
         "Cancelar", GTK_RESPONSE_CANCEL,
@@ -3746,20 +3617,12 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
     gtk_entry_set_visibility(GTK_ENTRY(e_password), FALSE);
     gtk_entry_set_input_purpose(GTK_ENTRY(e_password), GTK_INPUT_PURPOSE_PASSWORD);
 
-    GtkWidget *e_rol = gtk_combo_box_text_new();
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_rol), "0", "Jefe");
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_rol), "1", "Supervisor");
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_rol), "2", "Administrador");
-    gtk_combo_box_set_active(GTK_COMBO_BOX(e_rol), 0);
-
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Nombre:"), 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), e_nombre, 1, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Correo:"), 0, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), e_correo, 1, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Contrasena:"), 0, 2, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), e_password, 1, 2, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Tu rol en tu organizacion:"), 0, 3, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), e_rol, 1, 3, 1, 1);
 
     gtk_widget_show_all(dialogo);
 
@@ -3768,11 +3631,9 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
         const char *nombre = gtk_entry_get_text(GTK_ENTRY(e_nombre));
         const char *correo = gtk_entry_get_text(GTK_ENTRY(e_correo));
         const char *password = gtk_entry_get_text(GTK_ENTRY(e_password));
-        const gchar *rol_id_texto = gtk_combo_box_get_active_id(GTK_COMBO_BOX(e_rol));
-        RolCliente rol_elegido = rol_id_texto ? (RolCliente)atoi(rol_id_texto) : ROL_CLIENTE_JEFE;
         if (nombre[0] && correo[0] && password[0]) {
-            if (cliente_registrar(correo, password, nombre, rol_elegido) == 0
-                && cliente_autenticar(correo, password, cliente_out) == 0) {
+            if (cliente_registrar(correo, password, nombre) == 0) {
+                snprintf(nombre_out, nombre_len, "%s", nombre);
                 creado = TRUE;
             } else {
                 mostrar_mensaje(NULL, "No se pudo crear la cuenta (el correo ya podria estar registrado).", TRUE);
@@ -3789,10 +3650,9 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
  * no tiene cuenta, el boton "Registrarme" la crea ahi mismo. Hasta 3
  * intentos fallidos (crear cuenta no cuenta como intento). Devuelve
  * TRUE y llena nombre_out si el login (o el registro) fue exitoso. */
-static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_out) {
+static gboolean mostrar_login_cliente(char *nombre_out, size_t nombre_len, gboolean *es_admin_out) {
     int intentos = 0;
     const int max_intentos = 3;
-    gboolean no_registrado = FALSE;
 
     while (intentos < max_intentos) {
         GtkWidget *dialogo = gtk_dialog_new_with_buttons(
@@ -3839,13 +3699,9 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
         if (intentos > 0) {
             GtkWidget *lbl_error = gtk_label_new(NULL);
             gtk_widget_set_halign(lbl_error, GTK_ALIGN_START);
-            gchar *texto_error = no_registrado
-                ? g_strdup_printf(
-                    "<span foreground='red'>Ese correo no esta registrado. Intento %d de %d.</span>",
-                    intentos, max_intentos)
-                : g_strdup_printf(
-                    "<span foreground='red'>Correo o contrasena incorrectos. Intento %d de %d.</span>",
-                    intentos, max_intentos);
+            gchar *texto_error = g_strdup_printf(
+                "<span foreground='red'>Correo o contrasena incorrectos. Intento %d de %d.</span>",
+                intentos, max_intentos);
             gtk_label_set_markup(GTK_LABEL(lbl_error), texto_error);
             g_free(texto_error);
             gtk_box_pack_start(GTK_BOX(caja), lbl_error, FALSE, FALSE, 0);
@@ -3856,9 +3712,10 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
 
         if (respuesta == RESPUESTA_REGISTRARME) {
             gtk_widget_destroy(dialogo);
-            if (mostrar_registro_cliente(cliente_out)) {
+            char nombre_nuevo[64] = "";
+            if (mostrar_registro_cliente(nombre_nuevo, sizeof(nombre_nuevo))) {
+                snprintf(nombre_out, nombre_len, "%s", nombre_nuevo);
                 mostrar_mensaje(NULL, "Cuenta creada. Bienvenido a PawOS.", FALSE);
-                if (es_admin_out) *es_admin_out = FALSE;
                 return TRUE;
             }
             continue;
@@ -3881,19 +3738,20 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
         if (usuario_autenticar(correo_ingresado, password_ingresado, &rol_secreto) == 0
             && rol_secreto == ROL_ADMIN) {
             gtk_widget_destroy(dialogo);
-            snprintf(cliente_out->nombre, sizeof(cliente_out->nombre), "%s", correo_ingresado);
+            snprintf(nombre_out, nombre_len, "%s", correo_ingresado);
             if (es_admin_out) *es_admin_out = TRUE;
             return TRUE;
         }
 
-        gboolean ok = (cliente_autenticar(correo_ingresado, password_ingresado, cliente_out) == 0);
+        Cliente c;
+        gboolean ok = (cliente_autenticar(correo_ingresado, password_ingresado, &c) == 0);
         gtk_widget_destroy(dialogo);
 
         if (ok) {
+            snprintf(nombre_out, nombre_len, "%s", c.nombre);
             if (es_admin_out) *es_admin_out = FALSE;
             return TRUE;
         }
-        no_registrado = !cliente_existe(correo_ingresado);
         intentos++;
     }
 
@@ -4089,15 +3947,12 @@ int main(int argc, char **argv) {
                 logueado = TRUE;
             }
         } else {
-            Cliente cliente_actual;
-            memset(&cliente_actual, 0, sizeof(cliente_actual));
             gboolean es_admin = FALSE;
-            if (mostrar_login_cliente(&cliente_actual, &es_admin)) {
-                snprintf(nombre_sesion, sizeof(nombre_sesion), "%s", cliente_actual.nombre);
+            if (mostrar_login_cliente(nombre_sesion, sizeof(nombre_sesion), &es_admin)) {
                 if (es_admin) {
                     construir_ventana_principal(ROL_ADMIN, nombre_sesion);
                 } else {
-                    construir_ventana_cliente(&cliente_actual);
+                    construir_ventana_cliente(nombre_sesion);
                 }
                 logueado = TRUE;
             }

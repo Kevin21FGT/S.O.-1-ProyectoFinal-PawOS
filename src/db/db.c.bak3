@@ -255,19 +255,6 @@ const char *cliente_rol_nombre(RolCliente rol) {
     }
 }
 
-/* Solo dice si el correo existe en la tabla clientes, sin revisar
- * contrasena -- se usa nada mas para mostrar un mensaje distinto en
- * el login ("correo no registrado" vs "contrasena incorrecta"). */
-int cliente_existe(const char *correo) {
-    const char *sql = "SELECT 1 FROM clientes WHERE correo=?;";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return 0;
-    sqlite3_bind_text(st, 1, correo, -1, SQLITE_STATIC);
-    int existe = (sqlite3_step(st) == SQLITE_ROW) ? 1 : 0;
-    sqlite3_finalize(st);
-    return existe;
-}
-
 int cliente_autenticar(const char *correo, const char *password, Cliente *out) {
     const char *sql = "SELECT id, nombre, password, rol FROM clientes WHERE correo=?;";
     sqlite3_stmt *st;

@@ -87,7 +87,6 @@ int  usuario_autenticar(const char *username, const char *password, int *rol_out
 /* ---------- Clientes (publico externo: adoptantes y donantes) ---------- */
 int  cliente_registrar(const char *correo, const char *password, const char *nombre, RolCliente rol);
 int  cliente_autenticar(const char *correo, const char *password, Cliente *out);
-int  cliente_existe(const char *correo);
 int  cliente_actualizar(int id, const char *nombre, const char *password_nueva);
 const char *cliente_rol_nombre(RolCliente rol);
 int  mascota_listar_disponibles(Mascota **out, int *n);
