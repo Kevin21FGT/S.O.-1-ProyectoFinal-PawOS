@@ -1,6 +1,6 @@
 #ifndef PANTALLAS_H
 #define PANTALLAS_H
-#include "auth.h"
+#include "auth/auth.h"
 
 void pantalla_mascotas(Rol rol);
 void pantalla_vacunas(Rol rol);

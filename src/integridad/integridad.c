@@ -5,9 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../include/integridad.h"
-#include "../include/checksum.h"
-#include "../include/db.h"
+#include "integridad.h"
+#include "checksum.h"
+#include "db/db.h"
 #define RUTA_CHECKSUM_DEFECTO "/var/pawos/archivos/backups/donantes.checksum"
 #define RUTA_CHECKSUM_LOCAL   "donantes.checksum"
 

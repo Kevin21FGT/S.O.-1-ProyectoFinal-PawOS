@@ -2,7 +2,7 @@
 #ifndef PANTALLA_LOGIN_H
 #define PANTALLA_LOGIN_H
 
-#include "auth.h"
+#include "auth/auth.h"
 
 /* Muestra la pantalla de login del programa. Pide usuario y contrasena
  * hasta que acierte o se agoten los intentos. Devuelve 1 si inicio

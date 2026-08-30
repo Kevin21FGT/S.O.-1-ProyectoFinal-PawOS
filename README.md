@@ -349,6 +349,16 @@ Un botón "🔄 Buscar Actualizaciones" en el menú principal del GUI (`main_gtk
 3. Descarga el código, recompila el CLI y el GUI (`make` / `make gui`), e instala los binarios nuevos en `/usr/local/bin`.
 4. Si algo falla en cualquier paso (sin internet, error de compilación, sin permisos), se conserva la versión que ya estaba funcionando y se muestra un mensaje de error claro — nunca deja el sistema a medio actualizar.
 
+### Dialogo de novedades antes de actualizar (estilo tienda de aplicaciones)
+
+Antes de abrir la terminal del paso anterior, el propio boton "🔄 Buscar Actualizaciones" (`on_actualizar_clicked` en `main_gtk.c`) ya hace una primera revision el mismo, sin necesitar la terminal para eso: corre un `git fetch` + `git log` corto contra `/opt/pawos-src`, y segun el resultado:
+
+- **Sin conexion:** muestra un mensaje de error simple ("revisa tu conexion a internet") y no abre nada mas.
+- **Ya esta al dia:** muestra "Ya tienes la ultima version instalada." y termina ahi, sin molestar con una terminal para nada.
+- **Hay una version nueva (o es la primera instalacion):** abre un dialogo nativo de GTK con el titulo "PawOS - Actualizaciones", el changelog (un renglon por cada commit nuevo, cada uno con un icono segun de que tipo es — 🔧 correccion/estabilidad, ⭐ mejora, ✨ novedad, detectado por palabras clave en el propio mensaje del commit) y dos botones: "Cancelar" y "Actualizar ahora". Solo si el usuario confirma con "Actualizar ahora" se abre la terminal con `pawos-actualizar-gui` para hacer la descarga/recompilacion real (ver arriba).
+
+La idea es que el usuario final vea de forma clara y agradable que va a cambiar *antes* de comprometerse a actualizar, en vez de encontrarse una terminal en blanco corriendo comandos — el mismo tipo de experiencia que Google Play o Windows Update.
+
 ### Diseño "de programa comercial" (sin exponer el repositorio)
 
 A pedido explícito del equipo, el actualizador se comporta como el de cualquier programa comercial (Windows Update, actualizador de una app de escritorio): el usuario final nunca ve la URL del repositorio de GitHub ni el nombre de la rama, ni en la salida de la terminal ni mirando el código del script — ambos datos están codificados en base64 dentro de `pawos-actualizar-gui` en vez de aparecer como texto plano.

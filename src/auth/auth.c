@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <grp.h>
-#include "../include/auth.h"
+#include "auth.h"
 
 const char *auth_usuario_actual(void) {
     struct passwd *pw = getpwuid(getuid());

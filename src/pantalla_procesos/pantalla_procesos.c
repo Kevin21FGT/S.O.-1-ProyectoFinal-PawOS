@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include "pantalla_procesos.h"
-#include "procesos.h"
+#include "procesos/procesos.h"
 
 static void pausar(void) {
     mvprintw(LINES - 2, 2, "Presione cualquier tecla para continuar...");
