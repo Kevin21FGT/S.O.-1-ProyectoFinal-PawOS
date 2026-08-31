@@ -303,6 +303,13 @@ echo "=== 6. Creando /var/pawos y permisos ==="
 mkdir -p /var/pawos/reportes
 chown -R root:pawos-refugio /var/pawos
 chmod -R 2770 /var/pawos
+
+# Carpeta donde "Buscar Actualizaciones" (pawos-actualizar-gui) clona el
+# repositorio. Sin esto, un usuario normal no tiene permiso de crear
+# /opt/pawos-src (root:root, 755) y la actualizacion falla en silencio.
+mkdir -p /opt/pawos-src
+chown root:pawos-refugio /opt/pawos-src
+chmod 2775 /opt/pawos-src
 echo "=== 7. Configurando sudoers (solo apagar/reiniciar) ==="
 mkdir -p /etc/sudoers.d
 cat > /etc/sudoers.d/pawos-apagar << 'SUDOEOF'

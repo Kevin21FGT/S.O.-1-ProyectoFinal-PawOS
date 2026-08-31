@@ -336,6 +336,13 @@ mkdir -p /var/pawos/reportes
 chown -R root:pawos-refugio /var/pawos
 chmod -R 2770 /var/pawos
 
+# Carpeta donde "Buscar Actualizaciones" (pawos-actualizar-gui) clona el
+# repositorio. Sin esto, un usuario normal no tiene permiso de crear
+# /opt/pawos-src (root:root, 755) y la actualizacion falla en silencio.
+mkdir -p /opt/pawos-src
+chown root:pawos-refugio /opt/pawos-src
+chmod 2775 /opt/pawos-src
+
 # A quien instalo el paquete (el usuario real detras de "sudo") se le
 # da acceso automatico: sin esto, el respaldo en la nube y el acceso
 # a la base de datos en /var/pawos no funcionarian para nadie.
