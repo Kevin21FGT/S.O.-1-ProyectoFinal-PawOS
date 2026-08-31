@@ -58,39 +58,12 @@ typedef struct {
     char fecha[24];    /* YYYY-MM-DD HH:MM:SS, la genera el programa al insertar */
 } NotaVeterinario;
 
-/* Cliente = publico externo (adoptantes, donantes), NO es personal
- * del refugio. Tabla y login totalmente separados de "usuarios".
- *
- * "rol" aqui es el nivel del Cliente DENTRO de su propia organizacion
- * (otro refugio/veterinaria/negocio que usa PawOS) -- no tiene nada
- * que ver con los roles de Colaborador (Veterinario/Voluntario). */
-typedef enum {
-    ROL_CLIENTE_JEFE = 0,
-    ROL_CLIENTE_SUPERVISOR = 1,
-    ROL_CLIENTE_ADMIN = 2
-} RolCliente;
-
-typedef struct {
-    int        id;
-    char       correo[128];
-    char       nombre[64];
-    RolCliente rol;
-} Cliente;
-
 /* ---------- Ciclo de vida ---------- */
 int  db_init(const char *ruta);
 void db_close(void);
 
 /* ---------- Autenticacion (tabla usuarios) ---------- */
 int  usuario_autenticar(const char *username, const char *password, int *rol_out);
-
-/* ---------- Clientes (publico externo: adoptantes y donantes) ---------- */
-int  cliente_registrar(const char *correo, const char *password, const char *nombre, RolCliente rol);
-int  cliente_autenticar(const char *correo, const char *password, Cliente *out);
-int  cliente_existe(const char *correo);
-int  cliente_actualizar(int id, const char *nombre, const char *password_nueva);
-const char *cliente_rol_nombre(RolCliente rol);
-int  mascota_listar_disponibles(Mascota **out, int *n);
 
 /* ---------- Mascotas ---------- */
 int  mascota_agregar(const Mascota *m);
