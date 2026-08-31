@@ -3105,6 +3105,7 @@ static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
     const gchar *comando =
         "bash -c '"
         "REPO_DIR=/opt/pawos-src; RAMA=rama-Kevin; "
+        "git config --global --add safe.directory \"$REPO_DIR\" 2>/dev/null; "
         "if [ -d \"$REPO_DIR/.git\" ]; then "
         "  cd \"$REPO_DIR\" || { echo SIN_CONEXION; exit 0; }; "
         "  git fetch origin \"$RAMA\" >/dev/null 2>&1 || { echo SIN_CONEXION; exit 0; }; "

@@ -310,6 +310,12 @@ chmod -R 2770 /var/pawos
 mkdir -p /opt/pawos-src
 chown root:pawos-refugio /opt/pawos-src
 chmod 2775 /opt/pawos-src
+
+# Marca la carpeta como segura para TODOS los usuarios del equipo
+# (escribe en /etc/gitconfig). Sin esto, git rechaza operar ahi con
+# "posesion dudosa detectada" porque el dueno es root pero la usan
+# usuarios normales -- y ese error se confunde con "sin conexion".
+git config --system --add safe.directory /opt/pawos-src
 echo "=== 7. Configurando sudoers (solo apagar/reiniciar) ==="
 mkdir -p /etc/sudoers.d
 cat > /etc/sudoers.d/pawos-apagar << 'SUDOEOF'
