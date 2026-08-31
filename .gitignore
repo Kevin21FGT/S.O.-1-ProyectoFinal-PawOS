@@ -32,3 +32,4 @@ live-build-config/chroot.packages*
 /pawos-refugio-gui
 *.bak
 *.o
+*.bak*
