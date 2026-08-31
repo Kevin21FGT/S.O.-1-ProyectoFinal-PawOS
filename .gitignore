@@ -33,3 +33,6 @@ live-build-config/chroot.packages*
 *.bak
 *.o
 *.bak*
+pawos-refugio-gui-producto
+*.deb
+deb-build/

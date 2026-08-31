@@ -122,6 +122,12 @@ int db_init(const char *ruta) {
      * guardan como hash (crypt(), SHA-512), nunca en texto plano.
      * "INSERT OR IGNORE" sigue funcionando igual que antes: si el
      * usuario ya existe (username es UNIQUE), no hace nada. */
+#ifndef PAWOS_SIN_SEMILLA
+    /* Solo en la version del curso (make gui normal). La version
+     * "producto" (make gui-producto, la que usa construir-deb.sh)
+     * se compila con -DPAWOS_SIN_SEMILLA y se salta esto por
+     * completo -- en esa version, el primer Administrador lo crea
+     * cada quien desde el asistente de bienvenida (main_gtk.c). */
     {
         struct { const char *user; const char *pass; int rol; } semilla[] = {
             {"admin_refugio", "admin123", 0},
@@ -143,6 +149,7 @@ int db_init(const char *ruta) {
             }
         }
     }
+#endif
 
     /* Migracion aditiva: si la base de datos ya existia de una version
      * anterior de PawOS con contrasenas en texto plano (los hashes de
@@ -178,6 +185,7 @@ int db_init(const char *ruta) {
      * estaba aplicada. */
     sqlite3_exec(g_db, "ALTER TABLE vacunas ADD COLUMN observaciones TEXT DEFAULT '';", NULL, NULL, NULL);
     sqlite3_exec(g_db, "ALTER TABLE clientes ADD COLUMN rol INTEGER NOT NULL DEFAULT 0;", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "ALTER TABLE usuarios ADD COLUMN foto_base64 TEXT DEFAULT '';", NULL, NULL, NULL);
     return 0;
 }
 
@@ -209,6 +217,64 @@ int usuario_autenticar(const char *username, const char *password, int *rol_out)
     }
     sqlite3_finalize(st);
     return ok;
+}
+
+/* Crea un usuario nuevo en la tabla "usuarios" (Colaboradores:
+ * Administrador/Veterinario/Voluntario) con la contrasena ya
+ * hasheada. "foto_base64" es opcional (puede ser "" o NULL) -- se
+ * guarda tal cual, como texto, dentro de la misma base de datos, en
+ * vez de como un archivo aparte en disco. La usa tanto el asistente
+ * de bienvenida (para el primer Administrador) como la pantalla
+ * "Administrar Colaboradores". */
+int usuario_registrar(const char *username, const char *password, int rol, const char *foto_base64) {
+    char hash[128];
+    pawos_hash_password(password, hash, sizeof(hash));
+    const char *sql = "INSERT INTO usuarios (username, password, rol, foto_base64) VALUES (?,?,?,?);";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_text(st, 1, username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, hash, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 3, rol);
+    sqlite3_bind_text(st, 4, foto_base64 ? foto_base64 : "", -1, SQLITE_STATIC);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
+
+/* Dice si ya existe al menos un usuario con rol Administrador (rol=0)
+ * en la tabla "usuarios". El asistente de bienvenida (main_gtk.c) lo
+ * usa para decidir si hace falta mostrarse: en la version del curso
+ * siempre hay uno sembrado desde el arranque, asi que esto nunca
+ * dispara el asistente ahi. */
+int existe_admin(void) {
+    const char *sql = "SELECT 1 FROM usuarios WHERE rol=0 LIMIT 1;";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return 0;
+    int existe = (sqlite3_step(st) == SQLITE_ROW) ? 1 : 0;
+    sqlite3_finalize(st);
+    return existe;
+}
+
+/* Lista todos los Colaboradores (id, usuario, rol -- sin contrasena
+ * ni foto, para no cargar de mas) para la pantalla "Administrar
+ * Colaboradores". */
+int usuario_listar(UsuarioInfo **out, int *n) {
+    const char *sql = "SELECT id, username, rol FROM usuarios ORDER BY rol, username;";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    int cap = 8, cnt = 0;
+    UsuarioInfo *arr = malloc(sizeof(UsuarioInfo) * cap);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (cnt == cap) { cap *= 2; arr = realloc(arr, sizeof(UsuarioInfo) * cap); }
+        UsuarioInfo *u = &arr[cnt++];
+        u->id = sqlite3_column_int(st, 0);
+        snprintf(u->username, sizeof(u->username), "%s", (const char *)sqlite3_column_text(st, 1));
+        u->rol = sqlite3_column_int(st, 2);
+    }
+    sqlite3_finalize(st);
+    *out = arr;
+    *n = cnt;
+    return 0;
 }
 
 /* ---------------- Clientes (publico externo) ---------------- */

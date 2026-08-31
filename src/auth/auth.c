@@ -41,6 +41,8 @@ const char *auth_rol_nombre(Rol r) {
     switch (r) {
         case ROL_ADMIN: return "Administrador";
         case ROL_VETERINARIO: return "Veterinario";
+        case ROL_RESCATISTA: return "Rescatista";
+        case ROL_RECEPCIONISTA: return "Recepcionista";
         default: return "Voluntario";
     }
 }

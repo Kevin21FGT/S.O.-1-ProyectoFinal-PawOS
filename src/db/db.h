@@ -58,6 +58,15 @@ typedef struct {
     char fecha[24];    /* YYYY-MM-DD HH:MM:SS, la genera el programa al insertar */
 } NotaVeterinario;
 
+/* Datos basicos de un Colaborador (tabla "usuarios"), sin la
+ * contrasena -- se usa para listarlos en la pantalla "Administrar
+ * Colaboradores" (solo Administrador). */
+typedef struct {
+    int  id;
+    char username[32];
+    int  rol;
+} UsuarioInfo;
+
 /* Cliente = publico externo (adoptantes, donantes), NO es personal
  * del refugio. Tabla y login totalmente separados de "usuarios".
  *
@@ -83,6 +92,9 @@ void db_close(void);
 
 /* ---------- Autenticacion (tabla usuarios) ---------- */
 int  usuario_autenticar(const char *username, const char *password, int *rol_out);
+int  usuario_registrar(const char *username, const char *password, int rol, const char *foto_base64);
+int  existe_admin(void);
+int  usuario_listar(UsuarioInfo **out, int *n);
 
 /* ---------- Clientes (publico externo: adoptantes y donantes) ---------- */
 int  cliente_registrar(const char *correo, const char *password, const char *nombre, RolCliente rol);
