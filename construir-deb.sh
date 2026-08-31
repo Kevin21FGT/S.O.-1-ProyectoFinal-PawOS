@@ -343,6 +343,12 @@ mkdir -p /opt/pawos-src
 chown root:pawos-refugio /opt/pawos-src
 chmod 2775 /opt/pawos-src
 
+# Marca la carpeta como segura para TODOS los usuarios del equipo
+# (escribe en /etc/gitconfig). Sin esto, git rechaza operar ahi con
+# "posesion dudosa detectada" porque el dueno es root pero la usan
+# usuarios normales -- y ese error se confunde con "sin conexion".
+git config --system --add safe.directory /opt/pawos-src
+
 # A quien instalo el paquete (el usuario real detras de "sudo") se le
 # da acceso automatico: sin esto, el respaldo en la nube y el acceso
 # a la base de datos en /var/pawos no funcionarian para nadie.
