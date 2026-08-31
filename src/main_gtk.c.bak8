@@ -3792,7 +3792,6 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
 static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_out) {
     int intentos = 0;
     const int max_intentos = 3;
-    gboolean no_registrado = FALSE;
 
     while (intentos < max_intentos) {
         GtkWidget *dialogo = gtk_dialog_new_with_buttons(
@@ -3839,13 +3838,9 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
         if (intentos > 0) {
             GtkWidget *lbl_error = gtk_label_new(NULL);
             gtk_widget_set_halign(lbl_error, GTK_ALIGN_START);
-            gchar *texto_error = no_registrado
-                ? g_strdup_printf(
-                    "<span foreground='red'>Ese correo no esta registrado. Intento %d de %d.</span>",
-                    intentos, max_intentos)
-                : g_strdup_printf(
-                    "<span foreground='red'>Correo o contrasena incorrectos. Intento %d de %d.</span>",
-                    intentos, max_intentos);
+            gchar *texto_error = g_strdup_printf(
+                "<span foreground='red'>Correo o contrasena incorrectos. Intento %d de %d.</span>",
+                intentos, max_intentos);
             gtk_label_set_markup(GTK_LABEL(lbl_error), texto_error);
             g_free(texto_error);
             gtk_box_pack_start(GTK_BOX(caja), lbl_error, FALSE, FALSE, 0);
@@ -3893,7 +3888,6 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
             if (es_admin_out) *es_admin_out = FALSE;
             return TRUE;
         }
-        no_registrado = !cliente_existe(correo_ingresado);
         intentos++;
     }
 

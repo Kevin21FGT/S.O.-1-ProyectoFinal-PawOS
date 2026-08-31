@@ -61,8 +61,7 @@ static const char *SCHEMA =
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "  correo TEXT NOT NULL UNIQUE,"
     "  password TEXT NOT NULL,"
-    "  nombre TEXT NOT NULL,"
-    "  rol INTEGER NOT NULL DEFAULT 0"
+    "  nombre TEXT NOT NULL"
     ");"
     "CREATE TABLE IF NOT EXISTS notas_veterinario ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -177,7 +176,6 @@ int db_init(const char *ruta) {
      * que se ignora a proposito: no rompe nada, solo significa que ya
      * estaba aplicada. */
     sqlite3_exec(g_db, "ALTER TABLE vacunas ADD COLUMN observaciones TEXT DEFAULT '';", NULL, NULL, NULL);
-    sqlite3_exec(g_db, "ALTER TABLE clientes ADD COLUMN rol INTEGER NOT NULL DEFAULT 0;", NULL, NULL, NULL);
     return 0;
 }
 
@@ -213,63 +211,22 @@ int usuario_autenticar(const char *username, const char *password, int *rol_out)
 
 /* ---------------- Clientes (publico externo) ---------------- */
 
-int cliente_registrar(const char *correo, const char *password, const char *nombre, RolCliente rol) {
+int cliente_registrar(const char *correo, const char *password, const char *nombre) {
     char hash[128];
     pawos_hash_password(password, hash, sizeof(hash));
-    const char *sql = "INSERT INTO clientes (correo, password, nombre, rol) VALUES (?,?,?,?);";
+    const char *sql = "INSERT INTO clientes (correo, password, nombre) VALUES (?,?,?);";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_text(st, 1, correo, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 2, hash, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 3, nombre, -1, SQLITE_STATIC);
-    sqlite3_bind_int(st, 4, (int)rol);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? 0 : -1;
-}
-
-int cliente_actualizar(int id, const char *nombre, const char *password_nueva) {
-    sqlite3_stmt *st;
-    if (password_nueva && password_nueva[0] != '\0') {
-        char hash[128];
-        pawos_hash_password(password_nueva, hash, sizeof(hash));
-        if (sqlite3_prepare_v2(g_db, "UPDATE clientes SET nombre=?, password=? WHERE id=?;", -1, &st, NULL) != SQLITE_OK) return -1;
-        sqlite3_bind_text(st, 1, nombre, -1, SQLITE_STATIC);
-        sqlite3_bind_text(st, 2, hash, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(st, 3, id);
-    } else {
-        if (sqlite3_prepare_v2(g_db, "UPDATE clientes SET nombre=? WHERE id=?;", -1, &st, NULL) != SQLITE_OK) return -1;
-        sqlite3_bind_text(st, 1, nombre, -1, SQLITE_STATIC);
-        sqlite3_bind_int(st, 2, id);
-    }
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE ? 0 : -1;
-}
-
-const char *cliente_rol_nombre(RolCliente rol) {
-    switch (rol) {
-        case ROL_CLIENTE_ADMIN: return "Administrador";
-        case ROL_CLIENTE_SUPERVISOR: return "Supervisor";
-        default: return "Jefe";
-    }
-}
-
-/* Solo dice si el correo existe en la tabla clientes, sin revisar
- * contrasena -- se usa nada mas para mostrar un mensaje distinto en
- * el login ("correo no registrado" vs "contrasena incorrecta"). */
-int cliente_existe(const char *correo) {
-    const char *sql = "SELECT 1 FROM clientes WHERE correo=?;";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return 0;
-    sqlite3_bind_text(st, 1, correo, -1, SQLITE_STATIC);
-    int existe = (sqlite3_step(st) == SQLITE_ROW) ? 1 : 0;
-    sqlite3_finalize(st);
-    return existe;
 }
 
 int cliente_autenticar(const char *correo, const char *password, Cliente *out) {
-    const char *sql = "SELECT id, nombre, password, rol FROM clientes WHERE correo=?;";
+    const char *sql = "SELECT id, nombre, password FROM clientes WHERE correo=?;";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_text(st, 1, correo, -1, SQLITE_STATIC);
@@ -278,7 +235,6 @@ int cliente_autenticar(const char *correo, const char *password, Cliente *out) {
         int id = sqlite3_column_int(st, 0);
         const unsigned char *nombre = sqlite3_column_text(st, 1);
         const unsigned char *hash_guardado = sqlite3_column_text(st, 2);
-        int rol = sqlite3_column_int(st, 3);
         if (hash_guardado) {
             char *resultado = crypt(password, (const char *)hash_guardado);
             if (resultado && strcmp(resultado, (const char *)hash_guardado) == 0) {
@@ -286,7 +242,6 @@ int cliente_autenticar(const char *correo, const char *password, Cliente *out) {
                     out->id = id;
                     snprintf(out->correo, sizeof(out->correo), "%s", correo);
                     snprintf(out->nombre, sizeof(out->nombre), "%s", nombre ? (const char *)nombre : "");
-                    out->rol = (RolCliente)rol;
                 }
                 ok = 0;
             }
