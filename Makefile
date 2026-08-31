@@ -52,11 +52,23 @@ GTK_CFLAGS = $(shell pkg-config --cflags gtk+-3.0)
 GTK_LIBS   = $(shell pkg-config --libs gtk+-3.0)
 
 GUI_BIN = pawos-refugio-gui
+GUI_PRODUCTO_BIN = pawos-refugio-gui-producto
 
 gui: src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c
 	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt
 
-clean-gui:
-	rm -f $(GUI_BIN)
+# Variante para el instalador .deb ("vender el programa" - ver
+# construir-deb.sh): no siembra las cuentas fijas admin_refugio/
+# veterinario1/voluntario1. En su lugar, la primera vez que se abre
+# el programa se muestra un asistente para crear el Administrador con
+# una contrasena propia. La version del curso ("make gui" normal) no
+# cambia en nada. Genera un binario CON OTRO NOMBRE
+# (pawos-refugio-gui-producto) para que las dos versiones puedan
+# existir compiladas al mismo tiempo sin pisarse.
+gui-producto: src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c
+	$(CC) $(CFLAGS) -DPAWOS_SIN_SEMILLA $(GTK_CFLAGS) src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c -o $(GUI_PRODUCTO_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt
 
-.PHONY: gui clean-gui
+clean-gui:
+	rm -f $(GUI_BIN) $(GUI_PRODUCTO_BIN)
+
+.PHONY: gui gui-producto clean-gui

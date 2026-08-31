@@ -9,7 +9,9 @@
 typedef enum {
     ROL_ADMIN = 0,
     ROL_VETERINARIO,
-    ROL_VOLUNTARIO
+    ROL_VOLUNTARIO,
+    ROL_RESCATISTA,     /* responde alertas de sensores, registra animales rescatados */
+    ROL_RECEPCIONISTA   /* atiende adopciones y donantes */
 } Rol;
 
 /* Devuelve el usuario Linux que ejecuta el programa (login actual). */

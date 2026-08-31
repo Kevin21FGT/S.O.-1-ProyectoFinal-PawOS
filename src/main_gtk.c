@@ -299,6 +299,8 @@ static void aplicar_estilos(void) {
         ".badge-admin       { background-color: #E8B23D; color: #3B2A05; }"
         ".badge-veterinario { background-color: #2C8C99; color: #FFFFFF; }"
         ".badge-voluntario  { background-color: #6C7A76; color: #FFFFFF; }"
+        ".badge-rescatista    { background-color: #C1440E; color: #FFFFFF; }"
+        ".badge-recepcionista { background-color: #7A4FA3; color: #FFFFFF; }"
 
         /* Botones generales */
         "button {"
@@ -3212,6 +3214,263 @@ static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
     }
 }
 
+/* ---------------- Administrar Colaboradores (solo Admin) ---------------- */
+
+static const char *nombre_rol_colaborador(int rol) {
+    switch (rol) {
+        case ROL_ADMIN: return "Administrador";
+        case ROL_VETERINARIO: return "Veterinario";
+        case ROL_RESCATISTA: return "Rescatista";
+        case ROL_RECEPCIONISTA: return "Recepcionista";
+        default: return "Voluntario";
+    }
+}
+
+typedef struct {
+    GtkWidget    *ventana;
+    GtkWidget    *treeview;
+    GtkListStore *store;
+} ContextoColaboradores;
+
+static void cargar_colaboradores(ContextoColaboradores *ctx) {
+    gtk_list_store_clear(ctx->store);
+    UsuarioInfo *usuarios;
+    int n;
+    if (usuario_listar(&usuarios, &n) != 0) return;
+    for (int i = 0; i < n; i++) {
+        GtkTreeIter iter;
+        gtk_list_store_append(ctx->store, &iter);
+        gtk_list_store_set(ctx->store, &iter,
+            0, usuarios[i].username,
+            1, nombre_rol_colaborador(usuarios[i].rol),
+            -1);
+    }
+    free(usuarios);
+}
+
+/* referencias[0] = GtkImage de vista previa, referencias[1] = ventana
+ * padre (para centrar el selector de archivos encima). El base64 de
+ * la foto elegida queda guardado como dato asociado a la imagen de
+ * vista previa (g_object_set_data_full), para leerlo despues al
+ * guardar el formulario completo. */
+static void on_elegir_foto_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    GtkWidget **referencias = (GtkWidget **)datos;
+    GtkWidget *dialogo = gtk_file_chooser_dialog_new(
+        "Elegir foto", GTK_WINDOW(referencias[1]), GTK_FILE_CHOOSER_ACTION_OPEN,
+        "Cancelar", GTK_RESPONSE_CANCEL,
+        "Elegir", GTK_RESPONSE_ACCEPT,
+        NULL);
+
+    GtkFileFilter *filtro = gtk_file_filter_new();
+    gtk_file_filter_set_name(filtro, "Imagenes");
+    gtk_file_filter_add_mime_type(filtro, "image/png");
+    gtk_file_filter_add_mime_type(filtro, "image/jpeg");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialogo), filtro);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_ACCEPT) {
+        char *ruta = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialogo));
+        gchar *contenido = NULL;
+        gsize largo = 0;
+        if (ruta && g_file_get_contents(ruta, &contenido, &largo, NULL)) {
+            gchar *b64 = g_base64_encode((const guchar *)contenido, largo);
+            g_object_set_data_full(G_OBJECT(referencias[0]), "foto_base64", b64, g_free);
+
+            GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+            if (gdk_pixbuf_loader_write(loader, (const guchar *)contenido, largo, NULL)) {
+                gdk_pixbuf_loader_close(loader, NULL);
+                GdkPixbuf *pixbuf = gdk_pixbuf_loader_get_pixbuf(loader);
+                if (pixbuf) {
+                    GdkPixbuf *escalado = gdk_pixbuf_scale_simple(pixbuf, 64, 64, GDK_INTERP_BILINEAR);
+                    gtk_image_set_from_pixbuf(GTK_IMAGE(referencias[0]), escalado);
+                    g_object_unref(escalado);
+                }
+            }
+            g_object_unref(loader);
+            g_free(contenido);
+        }
+        g_free(ruta);
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void mostrar_formulario_nuevo_colaborador(ContextoColaboradores *ctx) {
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Nuevo Colaborador", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "Cancelar", GTK_RESPONSE_CANCEL,
+        "Crear", GTK_RESPONSE_ACCEPT,
+        NULL);
+    gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
+
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
+    gtk_container_add(GTK_CONTAINER(area), caja);
+
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+    gtk_box_pack_start(GTK_BOX(caja), grid, FALSE, FALSE, 0);
+
+    GtkWidget *lbl_user = gtk_label_new("Usuario:");
+    gtk_widget_set_halign(lbl_user, GTK_ALIGN_END);
+    GtkWidget *entrada_user = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), lbl_user, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entrada_user, 1, 0, 1, 1);
+
+    GtkWidget *lbl_pass = gtk_label_new("Contrasena:");
+    gtk_widget_set_halign(lbl_pass, GTK_ALIGN_END);
+    GtkWidget *entrada_pass = gtk_entry_new();
+    gtk_entry_set_visibility(GTK_ENTRY(entrada_pass), FALSE);
+    gtk_entry_set_input_purpose(GTK_ENTRY(entrada_pass), GTK_INPUT_PURPOSE_PASSWORD);
+    gtk_grid_attach(GTK_GRID(grid), lbl_pass, 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entrada_pass, 1, 1, 1, 1);
+
+    GtkWidget *lbl_rol = gtk_label_new("Rol:");
+    gtk_widget_set_halign(lbl_rol, GTK_ALIGN_END);
+    GtkWidget *combo_rol = gtk_combo_box_text_new();
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "0", "Administrador");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "1", "Veterinario");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "2", "Voluntario");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "3", "Rescatista");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "4", "Recepcionista");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(combo_rol), 2);
+    gtk_grid_attach(GTK_GRID(grid), lbl_rol, 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), combo_rol, 1, 2, 1, 1);
+
+    GtkWidget *lbl_foto = gtk_label_new("Foto:");
+    gtk_widget_set_halign(lbl_foto, GTK_ALIGN_END);
+    GtkWidget *caja_foto = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *imagen_preview = gtk_image_new_from_icon_name("avatar-default-symbolic", GTK_ICON_SIZE_DIALOG);
+    GtkWidget *btn_foto = gtk_button_new_with_label("Elegir foto... (opcional)");
+    gtk_box_pack_start(GTK_BOX(caja_foto), imagen_preview, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(caja_foto), btn_foto, FALSE, FALSE, 0);
+    gtk_grid_attach(GTK_GRID(grid), lbl_foto, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), caja_foto, 1, 3, 1, 1);
+
+    GtkWidget *referencias_foto[2];
+    referencias_foto[0] = imagen_preview;
+    referencias_foto[1] = dialogo;
+    g_signal_connect(btn_foto, "clicked", G_CALLBACK(on_elegir_foto_clicked), referencias_foto);
+
+    gtk_entry_set_activates_default(GTK_ENTRY(entrada_user), TRUE);
+    gtk_entry_set_activates_default(GTK_ENTRY(entrada_pass), TRUE);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_ACCEPT);
+
+    gtk_widget_show_all(dialogo);
+    gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+
+    if (respuesta == GTK_RESPONSE_ACCEPT) {
+        const char *usuario = gtk_entry_get_text(GTK_ENTRY(entrada_user));
+        const char *pass = gtk_entry_get_text(GTK_ENTRY(entrada_pass));
+        const char *rol_texto = gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo_rol));
+        int rol = rol_texto ? atoi(rol_texto) : 2;
+        const char *foto_b64 = (const char *)g_object_get_data(G_OBJECT(imagen_preview), "foto_base64");
+
+        if (usuario[0] == '\0' || strlen(pass) < 4) {
+            gtk_widget_destroy(dialogo);
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Usuario invalido o contrasena muy corta (minimo 4 caracteres).", TRUE);
+            return;
+        }
+
+        gboolean ok = (usuario_registrar(usuario, pass, rol, foto_b64 ? foto_b64 : "") == 0);
+        gtk_widget_destroy(dialogo);
+
+        if (ok) {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Colaborador creado correctamente.", FALSE);
+            cargar_colaboradores(ctx);
+        } else {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo crear (ese usuario ya existe).", TRUE);
+        }
+        return;
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void on_agregar_colaborador_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    mostrar_formulario_nuevo_colaborador((ContextoColaboradores *)datos);
+}
+
+static void abrir_pantalla_administrar_colaboradores(GtkWindow *padre, Rol rol) {
+    if (rol != ROL_ADMIN) {
+        mostrar_mensaje(padre, "Requiere rol Administrador.", TRUE);
+        return;
+    }
+
+    ContextoColaboradores *ctx = g_malloc0(sizeof(ContextoColaboradores));
+
+    GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    ctx->ventana = ventana;
+    gtk_window_set_title(GTK_WINDOW(ventana), "Administrar Colaboradores");
+    gtk_window_set_default_size(GTK_WINDOW(ventana), 420, 420);
+    gtk_window_set_transient_for(GTK_WINDOW(ventana), padre);
+    gtk_window_set_position(GTK_WINDOW(ventana), GTK_WIN_POS_CENTER_ON_PARENT);
+    gtk_container_set_border_width(GTK_CONTAINER(ventana), 14);
+    /* g_signal_connect_swapped (no g_signal_connect normal): asi GTK
+     * llama g_free(ctx) directo. Con g_signal_connect normal el
+     * callback recibe (ventana, ctx) y terminaria intentando liberar
+     * la ventana misma con g_free(), lo cual corrompe la memoria. */
+    g_signal_connect_swapped(ventana, "destroy", G_CALLBACK(g_free), ctx);
+
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(ventana), caja);
+
+    ctx->store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
+    ctx->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->store));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(ctx->treeview),
+        gtk_tree_view_column_new_with_attributes("Usuario", gtk_cell_renderer_text_new(), "text", 0, NULL));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(ctx->treeview),
+        gtk_tree_view_column_new_with_attributes("Rol", gtk_cell_renderer_text_new(), "text", 1, NULL));
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_container_add(GTK_CONTAINER(scroll), ctx->treeview);
+    gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
+
+    cargar_colaboradores(ctx);
+
+    GtkWidget *btn_agregar = gtk_button_new_with_label("+ Agregar Colaborador");
+    gtk_box_pack_start(GTK_BOX(caja), btn_agregar, FALSE, FALSE, 0);
+    g_signal_connect(btn_agregar, "clicked", G_CALLBACK(on_agregar_colaborador_clicked), ctx);
+
+    GtkWidget *btn_cerrar = gtk_button_new_with_label("Cerrar");
+    gtk_box_pack_start(GTK_BOX(caja), btn_cerrar, FALSE, FALSE, 0);
+    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
+
+    gtk_widget_show_all(ventana);
+}
+
+static void on_administrar_colaboradores_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    abrir_pantalla_administrar_colaboradores(GTK_WINDOW(d->ventana_principal), d->rol);
+}
+
+/* Dice si el rol dado tiene acceso al modulo "indice" (mismo orden
+ * que nombres_modulos[] mas abajo):
+ *   0=Mascotas 1=Vacunas 2=Adopciones 3=Donantes 4=Reportes
+ *   5=Procesos 6=Memoria 7=Respaldo 8=Alertas 9=AdministrarColaboradores
+ * Administrador siempre tiene acceso a todo. Veterinario y Voluntario
+ * mantienen las mismas reglas de antes; Rescatista y Recepcionista
+ * son roles mas acotados, pensados para tareas especificas. */
+static gboolean modulo_permitido(Rol rol, int indice) {
+    if (rol == ROL_ADMIN) return TRUE;
+
+    switch (rol) {
+        case ROL_VETERINARIO:
+            return !(indice == 5 || indice == 6 || indice == 9);
+        case ROL_VOLUNTARIO:
+            return !(indice == 3 || indice == 4 || indice == 5 || indice == 6 || indice == 9);
+        case ROL_RESCATISTA:
+            return (indice == 0 || indice == 8);
+        case ROL_RECEPCIONISTA:
+            return (indice == 2 || indice == 3);
+        default:
+            return FALSE;
+    }
+}
+
 static void construir_ventana_principal(Rol rol, const char *usuario) {
     GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ventana), "PawOS Refugio");
@@ -3256,8 +3515,10 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     GtkWidget *badge_rol = gtk_label_new(auth_rol_nombre(rol));
     gtk_style_context_add_class(gtk_widget_get_style_context(badge_rol), "badge");
     const char *clase_badge =
-        (rol == ROL_ADMIN)       ? "badge-admin" :
-        (rol == ROL_VETERINARIO) ? "badge-veterinario" : "badge-voluntario";
+        (rol == ROL_ADMIN)         ? "badge-admin" :
+        (rol == ROL_VETERINARIO)   ? "badge-veterinario" :
+        (rol == ROL_RESCATISTA)    ? "badge-rescatista" :
+        (rol == ROL_RECEPCIONISTA) ? "badge-recepcionista" : "badge-voluntario";
     gtk_style_context_add_class(gtk_widget_get_style_context(badge_rol), clase_badge);
     gtk_box_pack_start(GTK_BOX(fila_usuario), badge_rol, FALSE, FALSE, 0);
 
@@ -3278,6 +3539,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "Administracion de Memoria",
         "Respaldo en la Nube",
         "Alertas de Sensores",
+        "Administrar Colaboradores",
     };
     /* Icono (emoji) por modulo, solo cosmetico -- no afecta la logica. */
     const char *iconos_modulos[] = {
@@ -3290,6 +3552,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "\xF0\x9F\xA7\xA0", /* brain */
         "\xE2\x98\x81",     /* cloud */
         "\xF0\x9F\x9A\xA8", /* siren */
+        "\xF0\x9F\x91\xA5", /* people */
     };
     /* Categoria por modulo (solo cosmetica, define el color del boton):
      * refugio = atencion directa al animal, gestion = administrativo,
@@ -3297,6 +3560,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     const char *categorias_modulos[] = {
         "cat-refugio", "cat-refugio", "cat-refugio", "cat-gestion",
         "cat-gestion", "cat-sistema", "cat-sistema", "cat-gestion", "cat-refugio",
+        "cat-gestion",
     };
     GCallback manejadores[] = {
         G_CALLBACK(on_mascotas_clicked),
@@ -3308,8 +3572,9 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         G_CALLBACK(on_memoria_clicked),
         G_CALLBACK(on_respaldo_clicked),
         G_CALLBACK(on_alertas_clicked),
+        G_CALLBACK(on_administrar_colaboradores_clicked),
     };
-    const int total_modulos = 9;
+    const int total_modulos = 10;
 
     DatosBotonModulo *datos_botones = g_malloc(sizeof(DatosBotonModulo));
     datos_botones->ventana_principal = ventana;
@@ -3330,15 +3595,9 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         /* Los botones siempre se muestran; solo se deshabilitan (no se
          * ocultan) cuando el rol actual no tiene acceso a ese modulo,
          * igual que ya hacian las pantallas del CLI. */
-        gboolean bloqueado_voluntario = (i == 3 || i == 4);           /* Donantes, Reportes */
-        gboolean bloqueado_no_admin   = (i == 5 || i == 6);           /* Procesos, Memoria */
-
-        if (bloqueado_voluntario && rol == ROL_VOLUNTARIO) {
+        if (!modulo_permitido(rol, i)) {
             gtk_widget_set_sensitive(boton, FALSE);
-            gtk_widget_set_tooltip_text(boton, "Requiere rol Admin o Veterinario.");
-        } else if (bloqueado_no_admin && rol != ROL_ADMIN) {
-            gtk_widget_set_sensitive(boton, FALSE);
-            gtk_widget_set_tooltip_text(boton, "Requiere rol Administrador.");
+            gtk_widget_set_tooltip_text(boton, "Tu rol no tiene acceso a este modulo.");
         }
     }
 
@@ -3880,8 +4139,12 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
         int rol_secreto = -1;
         if (usuario_autenticar(correo_ingresado, password_ingresado, &rol_secreto) == 0
             && rol_secreto == ROL_ADMIN) {
-            gtk_widget_destroy(dialogo);
+            /* Copiar el texto ANTES de destruir el dialogo: una vez
+             * destruido, "correo_ingresado" (que apunta al buffer
+             * interno del GtkEntry) queda invalido -- leerlo despues
+             * es memoria ya liberada (use-after-free). */
             snprintf(cliente_out->nombre, sizeof(cliente_out->nombre), "%s", correo_ingresado);
+            gtk_widget_destroy(dialogo);
             if (es_admin_out) *es_admin_out = TRUE;
             return TRUE;
         }
@@ -4042,6 +4305,113 @@ static gboolean mostrar_login_gtk(char *usuario_out, size_t usuario_len, Rol *ro
     return FALSE;
 }
 
+/* Asistente de bienvenida: crea la cuenta del primer Administrador.
+ * Solo se muestra si "existe_admin()" dice que todavia no hay
+ * ninguno -- en la practica, eso solo pasa en la version "producto"
+ * (compilada con -DPAWOS_SIN_SEMILLA, ver Makefile: "gui-producto"),
+ * porque la version del curso siempre siembra un Administrador desde
+ * el arranque. No se puede cancelar: hace falta un Administrador
+ * para poder usar el programa. */
+static void mostrar_asistente_bienvenida(void) {
+    GtkWidget *bienvenida = gtk_message_dialog_new(
+        NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+        "Bienvenido a PawOS Refugio");
+    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(bienvenida),
+        "Antes de empezar, vamos a crear la cuenta de Administrador de este refugio.");
+    gtk_dialog_run(GTK_DIALOG(bienvenida));
+    gtk_widget_destroy(bienvenida);
+
+    for (;;) {
+        GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+            "PawOS - Crear Administrador", NULL, GTK_DIALOG_MODAL,
+            "Crear cuenta", GTK_RESPONSE_ACCEPT,
+            NULL);
+        gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
+
+        GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+        GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
+        gtk_container_add(GTK_CONTAINER(area), caja);
+
+        GtkWidget *titulo = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(titulo),
+            "<span size='large' weight='bold'>Cuenta de Administrador</span>");
+        gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+        GtkWidget *grid = gtk_grid_new();
+        gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+        gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+        gtk_box_pack_start(GTK_BOX(caja), grid, FALSE, FALSE, 0);
+
+        GtkWidget *lbl_user = gtk_label_new("Usuario:");
+        gtk_widget_set_halign(lbl_user, GTK_ALIGN_END);
+        GtkWidget *entrada_user = gtk_entry_new();
+        gtk_grid_attach(GTK_GRID(grid), lbl_user, 0, 0, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_user, 1, 0, 1, 1);
+
+        GtkWidget *lbl_pass = gtk_label_new("Contrasena:");
+        gtk_widget_set_halign(lbl_pass, GTK_ALIGN_END);
+        GtkWidget *entrada_pass = gtk_entry_new();
+        gtk_entry_set_visibility(GTK_ENTRY(entrada_pass), FALSE);
+        gtk_entry_set_input_purpose(GTK_ENTRY(entrada_pass), GTK_INPUT_PURPOSE_PASSWORD);
+        gtk_grid_attach(GTK_GRID(grid), lbl_pass, 0, 1, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_pass, 1, 1, 1, 1);
+
+        GtkWidget *lbl_pass2 = gtk_label_new("Confirmar:");
+        gtk_widget_set_halign(lbl_pass2, GTK_ALIGN_END);
+        GtkWidget *entrada_pass2 = gtk_entry_new();
+        gtk_entry_set_visibility(GTK_ENTRY(entrada_pass2), FALSE);
+        gtk_entry_set_input_purpose(GTK_ENTRY(entrada_pass2), GTK_INPUT_PURPOSE_PASSWORD);
+        gtk_grid_attach(GTK_GRID(grid), lbl_pass2, 0, 2, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_pass2, 1, 2, 1, 1);
+
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_user), TRUE);
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_pass), TRUE);
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_pass2), TRUE);
+        gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_ACCEPT);
+
+        gtk_widget_show_all(dialogo);
+        gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+
+        if (respuesta != GTK_RESPONSE_ACCEPT) {
+            /* Cerrar esta ventana (la X) o cancelar aqui cierra el
+             * programa por completo -- antes esto volvia a abrir la
+             * misma ventana en un ciclo infinito, sin forma de salir. */
+            gtk_widget_destroy(dialogo);
+            db_close();
+            exit(0);
+        }
+
+        char usuario_copia[64];
+        char pass1_copia[64];
+        char pass2_copia[64];
+        snprintf(usuario_copia, sizeof(usuario_copia), "%s", gtk_entry_get_text(GTK_ENTRY(entrada_user)));
+        snprintf(pass1_copia, sizeof(pass1_copia), "%s", gtk_entry_get_text(GTK_ENTRY(entrada_pass)));
+        snprintf(pass2_copia, sizeof(pass2_copia), "%s", gtk_entry_get_text(GTK_ENTRY(entrada_pass2)));
+        gtk_widget_destroy(dialogo);
+
+        const char *error = NULL;
+        if (usuario_copia[0] == '\0') {
+            error = "El usuario no puede estar vacio.";
+        } else if (strlen(pass1_copia) < 4) {
+            error = "La contrasena debe tener al menos 4 caracteres.";
+        } else if (strcmp(pass1_copia, pass2_copia) != 0) {
+            error = "Las contrasenas no coinciden.";
+        }
+
+        if (error) {
+            mostrar_mensaje(NULL, error, TRUE);
+            continue;
+        }
+
+        if (usuario_registrar(usuario_copia, pass1_copia, ROL_ADMIN, "") == 0) {
+            mostrar_mensaje(NULL, "Cuenta de Administrador creada. Ya puedes iniciar sesion.", FALSE);
+            return;
+        }
+        mostrar_mensaje(NULL, "No se pudo crear la cuenta (ese usuario ya existe). Intenta con otro nombre.", TRUE);
+    }
+}
+
 int main(int argc, char **argv) {
     gtk_init(&argc, &argv);
 
@@ -4069,6 +4439,10 @@ int main(int argc, char **argv) {
 
     if (!memoria_inicializar()) {
         fprintf(stderr, "Aviso: no se pudo inicializar el sistema de memoria.\n");
+    }
+
+    if (!existe_admin()) {
+        mostrar_asistente_bienvenida();
     }
 
     for (;;) {
