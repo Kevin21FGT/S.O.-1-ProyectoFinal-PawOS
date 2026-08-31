@@ -336,6 +336,10 @@ cat > /etc/sudoers.d/pawos-respaldo << 'SUDOEOF2'
 %pawos-admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl --no-block start pawos-backup.service, /usr/local/bin/pawos-configurar-respaldo, /usr/local/bin/pawos-listar-respaldos, /usr/local/bin/pawos-restaurar-nube, /usr/local/bin/pawos-backup-nube
 SUDOEOF2
 chmod 440 /etc/sudoers.d/pawos-respaldo
+cat > /etc/sudoers.d/pawos-actualizar << 'SUDOEOF3'
+%pawos-refugio ALL=(ALL) NOPASSWD: /usr/bin/cp /opt/pawos-src/pawos-refugio-gui /usr/local/bin/pawos-refugio-gui.new, /usr/bin/cp /opt/pawos-src/pawos-refugio /usr/local/bin/pawos-refugio.new, /usr/bin/chmod 755 /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio.new, /usr/bin/mv -f /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio-gui, /usr/bin/mv -f /usr/local/bin/pawos-refugio.new /usr/local/bin/pawos-refugio
+SUDOEOF3
+chmod 440 /etc/sudoers.d/pawos-actualizar
 echo "=== 8. Instalando servicios systemd ==="
 cat > /etc/systemd/system/pawos-monitoreo.service << 'EOF'
 [Unit]
