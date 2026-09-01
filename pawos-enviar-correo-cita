@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""
+pawos-enviar-correo-cita
+
+Manda un correo con un PDF adjunto (recordatorio de cita) usando una
+cuenta de Gmail configurada en /etc/pawos/notificaciones.conf.
+
+El archivo de configuracion tiene este formato (una linea por dato):
+    GMAIL_USER=pawosrefugio@gmail.com
+    GMAIL_APP_PASSWORD=abcdefghijklmnop
+
+Uso:
+    pawos-enviar-correo-cita --para correo@ejemplo.com --pdf /ruta/cita.pdf \
+        --cliente "Juan Perez" --mascota "Firulais" --fecha "2026-09-15"
+"""
+
+import argparse
+import smtplib
+import sys
+from email.message import EmailMessage
+from pathlib import Path
+
+CONFIG_PATH = "/etc/pawos/notificaciones.conf"
+
+
+def leer_config():
+    config = {}
+    ruta = Path(CONFIG_PATH)
+    if not ruta.exists():
+        print(f"ERROR: no existe {CONFIG_PATH}. Configura primero el correo desde PawOS Refugio (Admin).", file=sys.stderr)
+        sys.exit(1)
+    for linea in ruta.read_text(encoding="utf-8").splitlines():
+        linea = linea.strip()
+        if not linea or linea.startswith("#") or "=" not in linea:
+            continue
+        clave, valor = linea.split("=", 1)
+        config[clave.strip()] = valor.strip()
+    return config
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--para", required=True, help="Correo del Cliente")
+    p.add_argument("--pdf", required=True, help="Ruta al PDF a adjuntar")
+    p.add_argument("--cliente", required=True)
+    p.add_argument("--mascota", required=True)
+    p.add_argument("--fecha", required=True)
+    p.add_argument("--refugio", default="PawOS Refugio")
+    args = p.parse_args()
+
+    config = leer_config()
+    usuario = config.get("GMAIL_USER")
+    clave_app = config.get("GMAIL_APP_PASSWORD")
+    if not usuario or not clave_app:
+        print("ERROR: falta GMAIL_USER o GMAIL_APP_PASSWORD en la configuracion.", file=sys.stderr)
+        sys.exit(1)
+
+    ruta_pdf = Path(args.pdf)
+    if not ruta_pdf.exists():
+        print(f"ERROR: no se encontro el PDF en {args.pdf}", file=sys.stderr)
+        sys.exit(1)
+
+    mensaje = EmailMessage()
+    mensaje["Subject"] = f"Recordatorio de cita - {args.mascota} - {args.refugio}"
+    mensaje["From"] = usuario
+    mensaje["To"] = args.para
+    mensaje.set_content(
+        f"Hola {args.cliente},\n\n"
+        f"Este es un recordatorio de la proxima cita de {args.mascota}, programada para el {args.fecha}.\n\n"
+        f"Adjuntamos el detalle en PDF.\n\n"
+        f"-- {args.refugio}"
+    )
+    mensaje.add_attachment(
+        ruta_pdf.read_bytes(),
+        maintype="application",
+        subtype="pdf",
+        filename=ruta_pdf.name,
+    )
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as smtp:
+            smtp.starttls()
+            smtp.login(usuario, clave_app)
+            smtp.send_message(mensaje)
+    except Exception as e:
+        print(f"ERROR: no se pudo enviar el correo: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Correo enviado a {args.para}")
+
+
+if __name__ == "__main__":
+    main()

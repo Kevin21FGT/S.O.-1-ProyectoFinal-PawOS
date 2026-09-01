@@ -731,6 +731,18 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_prox), "AAAA-MM-DD (opcional)");
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_obs), "Opcional");
 
+    GtkWidget *e_cliente = gtk_combo_box_text_new();
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_cliente), "0", "(Ninguno)");
+    Cliente *lista_clientes_vac = NULL;
+    int n_clientes_vac = 0;
+    cliente_listar(&lista_clientes_vac, &n_clientes_vac);
+    for (int i = 0; i < n_clientes_vac; i++) {
+        char id_cliente_txt[16];
+        snprintf(id_cliente_txt, sizeof(id_cliente_txt), "%d", lista_clientes_vac[i].id);
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_cliente), id_cliente_txt, lista_clientes_vac[i].nombre);
+    }
+    gtk_combo_box_set_active(GTK_COMBO_BOX(e_cliente), 0);
+
     gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nombre de la vacuna:"), 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), e_nombre, 1, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Fecha de aplicacion:"), 0, 1, 1, 1);
@@ -739,6 +751,8 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_prox, 1, 2, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Observaciones:"), 0, 3, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), e_obs, 1, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Cliente a notificar (opcional):"), 0, 4, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_cliente, 1, 4, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
     gtk_widget_show_all(dialogo);
@@ -751,14 +765,55 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
         snprintf(v.fecha_aplicacion, sizeof(v.fecha_aplicacion), "%s", gtk_entry_get_text(GTK_ENTRY(e_aplic)));
         snprintf(v.fecha_proxima, sizeof(v.fecha_proxima), "%s", gtk_entry_get_text(GTK_ENTRY(e_prox)));
         snprintf(v.observaciones, sizeof(v.observaciones), "%s", gtk_entry_get_text(GTK_ENTRY(e_obs)));
+        const gchar *cliente_id_texto = gtk_combo_box_get_active_id(GTK_COMBO_BOX(e_cliente));
+        v.cliente_id = cliente_id_texto ? atoi(cliente_id_texto) : 0;
 
         if (vacuna_agregar(&v) == 0) {
             cargar_vacunas(ctx);
             mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Vacuna registrada.", FALSE);
+
+            /* Si se eligio un Cliente para notificar, se ofrece mandar
+             * el recordatorio (PDF por correo y WhatsApp) ya mismo. Si
+             * no se eligio ninguno (v.cliente_id == 0), nada de esto
+             * corre -- se comporta exactamente igual que antes. */
+            if (v.cliente_id > 0) {
+                Cliente *cliente_elegido = NULL;
+                for (int i = 0; i < n_clientes_vac; i++) {
+                    if (lista_clientes_vac[i].id == v.cliente_id) {
+                        cliente_elegido = &lista_clientes_vac[i];
+                        break;
+                    }
+                }
+                if (cliente_elegido) {
+                    gchar *pregunta = g_strdup_printf(
+                        "Enviar recordatorio de esta cita a %s por correo y WhatsApp?",
+                        cliente_elegido->nombre);
+                    GtkWidget *confirmar = gtk_message_dialog_new(
+                        GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION,
+                        GTK_BUTTONS_YES_NO, "%s", pregunta);
+                    g_free(pregunta);
+                    gint respuesta = gtk_dialog_run(GTK_DIALOG(confirmar));
+                    gtk_widget_destroy(confirmar);
+                    if (respuesta == GTK_RESPONSE_YES) {
+                        gchar *argv_envio[] = {
+                            "x-terminal-emulator", "-e", "pawos-notificar-cita",
+                            cliente_elegido->correo, cliente_elegido->telefono,
+                            cliente_elegido->nombre, m.nombre, v.nombre_vacuna, v.fecha_proxima,
+                            NULL
+                        };
+                        GError *error_envio = NULL;
+                        if (!g_spawn_async(NULL, argv_envio, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error_envio)) {
+                            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo abrir el envio de recordatorio.", TRUE);
+                            if (error_envio) g_error_free(error_envio);
+                        }
+                    }
+                }
+            }
         } else {
             mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Error al registrar la vacuna.", TRUE);
         }
     }
+    free(lista_clientes_vac);
     gtk_widget_destroy(dialogo);
 }
 
@@ -3460,9 +3515,9 @@ static gboolean modulo_permitido(Rol rol, int indice) {
 
     switch (rol) {
         case ROL_VETERINARIO:
-            return !(indice == 5 || indice == 6 || indice == 9);
+            return !(indice == 5 || indice == 6 || indice == 9 || indice == 10 || indice == 11);
         case ROL_VOLUNTARIO:
-            return !(indice == 3 || indice == 4 || indice == 5 || indice == 6 || indice == 9);
+            return !(indice == 3 || indice == 4 || indice == 5 || indice == 6 || indice == 9 || indice == 10 || indice == 11);
         case ROL_RESCATISTA:
             return (indice == 0 || indice == 8);
         case ROL_RECEPCIONISTA:
@@ -3470,6 +3525,191 @@ static gboolean modulo_permitido(Rol rol, int indice) {
         default:
             return FALSE;
     }
+}
+
+/* Cambia el rol (Jefe/Supervisor/Administrador) de un Cliente ya
+ * registrado -- necesario porque el registro publico ya no deja
+ * elegirlo (ver mostrar_registro_cliente). Solo Administrador. */
+static void on_cambiar_rol_cliente_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    GtkTreeView *vista = GTK_TREE_VIEW(datos);
+    GtkTreeSelection *seleccion = gtk_tree_view_get_selection(vista);
+    GtkTreeModel *modelo;
+    GtkTreeIter iter;
+    if (!gtk_tree_selection_get_selected(seleccion, &modelo, &iter)) {
+        mostrar_mensaje(NULL, "Selecciona un Cliente de la lista primero.", TRUE);
+        return;
+    }
+    gint id_cliente;
+    gtk_tree_model_get(modelo, &iter, 0, &id_cliente, -1);
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Cambiar rol", NULL, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "0", "Jefe");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "1", "Supervisor");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "2", "Administrador");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+    gtk_container_set_border_width(GTK_CONTAINER(combo), 12);
+    gtk_container_add(GTK_CONTAINER(area), combo);
+    gtk_widget_show_all(dialogo);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        const gchar *id_texto = gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo));
+        RolCliente nuevo_rol = id_texto ? (RolCliente)atoi(id_texto) : ROL_CLIENTE_JEFE;
+        if (cliente_actualizar_rol(id_cliente, nuevo_rol) == 0) {
+            gtk_list_store_set(GTK_LIST_STORE(modelo), &iter, 2, cliente_rol_nombre(nuevo_rol), -1);
+            mostrar_mensaje(NULL, "Rol actualizado.", FALSE);
+        } else {
+            mostrar_mensaje(NULL, "No se pudo actualizar el rol.", TRUE);
+        }
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void on_administrar_clientes_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    GtkWindow *padre = (d && d->ventana_principal) ? GTK_WINDOW(d->ventana_principal) : NULL;
+    if (!d || d->rol != ROL_ADMIN) {
+        mostrar_mensaje(padre, "Solo el Administrador puede administrar Clientes.", TRUE);
+        return;
+    }
+
+    GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(ventana), "Administrar Clientes");
+    gtk_window_set_default_size(GTK_WINDOW(ventana), 520, 400);
+    gtk_window_set_transient_for(GTK_WINDOW(ventana), padre);
+    gtk_window_set_position(GTK_WINDOW(ventana), GTK_WIN_POS_CENTER_ON_PARENT);
+
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 12);
+    gtk_container_add(GTK_CONTAINER(ventana), caja);
+
+    GtkListStore *store = gtk_list_store_new(4, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+    Cliente *lista = NULL;
+    int n = 0;
+    cliente_listar(&lista, &n);
+    for (int i = 0; i < n; i++) {
+        GtkTreeIter iter;
+        gtk_list_store_append(store, &iter);
+        gtk_list_store_set(store, &iter,
+            0, lista[i].id,
+            1, lista[i].nombre,
+            2, cliente_rol_nombre(lista[i].rol),
+            3, lista[i].correo,
+            -1);
+    }
+    free(lista);
+
+    GtkWidget *vista = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+    g_object_unref(store);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(vista), -1, "Nombre", gtk_cell_renderer_text_new(), "text", 1, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(vista), -1, "Rol actual", gtk_cell_renderer_text_new(), "text", 2, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(vista), -1, "Correo", gtk_cell_renderer_text_new(), "text", 3, NULL);
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_container_add(GTK_CONTAINER(scroll), vista);
+    gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
+
+    GtkWidget *btn_cambiar = gtk_button_new_with_label("Cambiar rol del seleccionado");
+    g_signal_connect(btn_cambiar, "clicked", G_CALLBACK(on_cambiar_rol_cliente_clicked), vista);
+    gtk_box_pack_start(GTK_BOX(caja), btn_cambiar, FALSE, FALSE, 0);
+
+    GtkWidget *btn_cerrar = gtk_button_new_with_label("Cerrar");
+    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
+    gtk_box_pack_start(GTK_BOX(caja), btn_cerrar, FALSE, FALSE, 0);
+
+    gtk_widget_show_all(ventana);
+}
+
+/* Pantalla de Administrador para guardar las credenciales de correo
+ * (Gmail) y WhatsApp (Green API) usadas por Agenda de Vacunas para
+ * mandar recordatorios de citas. El formulario mismo NO escribe el
+ * archivo de configuracion -- solo llama (via sudo) al script
+ * pawos-configurar-notificaciones, el unico con permiso de escribir
+ * /etc/pawos/notificaciones.conf (protegido, 600, root:root). */
+static void on_configurar_notificaciones_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    GtkWindow *padre = (d && d->ventana_principal) ? GTK_WINDOW(d->ventana_principal) : NULL;
+    if (!d || d->rol != ROL_ADMIN) {
+        mostrar_mensaje(padre, "Solo el Administrador puede configurar las notificaciones.", TRUE);
+        return;
+    }
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Configurar Notificaciones", padre, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_OK, NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dialogo), 420, -1);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 14);
+    gtk_container_add(GTK_CONTAINER(area), grid);
+
+    GtkWidget *aviso = gtk_label_new(
+        "Credenciales para mandar recordatorios de citas por correo y WhatsApp.\n"
+        "Se guardan protegidas en el sistema (no se muestran de vuelta).");
+    gtk_label_set_line_wrap(GTK_LABEL(aviso), TRUE);
+    gtk_grid_attach(GTK_GRID(grid), aviso, 0, 0, 2, 1);
+
+    GtkWidget *e_gmail_user = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_gmail_user), "correo@gmail.com");
+    GtkWidget *e_gmail_pass = gtk_entry_new();
+    gtk_entry_set_visibility(GTK_ENTRY(e_gmail_pass), FALSE);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_gmail_pass), "Contrasena de aplicacion (16 caracteres)");
+    GtkWidget *e_green_url = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_green_url), "https://XXXX.api.greenapi.com");
+    GtkWidget *e_green_id = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_green_id), "idInstance");
+    GtkWidget *e_green_token = gtk_entry_new();
+    gtk_entry_set_visibility(GTK_ENTRY(e_green_token), FALSE);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_green_token), "apiTokenInstance");
+
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Correo Gmail:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_gmail_user, 1, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Contrasena de app:"), 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_gmail_pass, 1, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Green API URL:"), 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_green_url, 1, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Green API idInstance:"), 0, 4, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_green_id, 1, 4, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Green API apiToken:"), 0, 5, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_green_token, 1, 5, 1, 1);
+
+    gtk_widget_show_all(dialogo);
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        const char *gmail_user = gtk_entry_get_text(GTK_ENTRY(e_gmail_user));
+        const char *gmail_pass = gtk_entry_get_text(GTK_ENTRY(e_gmail_pass));
+        const char *green_url = gtk_entry_get_text(GTK_ENTRY(e_green_url));
+        const char *green_id = gtk_entry_get_text(GTK_ENTRY(e_green_id));
+        const char *green_token = gtk_entry_get_text(GTK_ENTRY(e_green_token));
+
+        if (!gmail_user[0] || !gmail_pass[0] || !green_url[0] || !green_id[0] || !green_token[0]) {
+            mostrar_mensaje(padre, "Completa todos los campos.", TRUE);
+        } else {
+            FILE *proceso = popen("sudo /usr/local/bin/pawos-configurar-notificaciones", "w");
+            if (!proceso) {
+                mostrar_mensaje(padre, "No se pudo iniciar el guardado de la configuracion.", TRUE);
+            } else {
+                fprintf(proceso, "%s\n%s\n%s\n%s\n%s\n", gmail_user, gmail_pass, green_url, green_id, green_token);
+                int rc = pclose(proceso);
+                if (rc == 0) {
+                    mostrar_mensaje(padre, "Configuracion guardada correctamente.", FALSE);
+                } else {
+                    mostrar_mensaje(padre, "No se pudo guardar la configuracion (revisa permisos de sudo).", TRUE);
+                }
+            }
+        }
+    }
+    gtk_widget_destroy(dialogo);
 }
 
 static void construir_ventana_principal(Rol rol, const char *usuario) {
@@ -3541,6 +3781,8 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "Respaldo en la Nube",
         "Alertas de Sensores",
         "Administrar Colaboradores",
+        "Configurar Notificaciones",
+        "Administrar Clientes",
     };
     /* Icono (emoji) por modulo, solo cosmetico -- no afecta la logica. */
     const char *iconos_modulos[] = {
@@ -3554,6 +3796,8 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "\xE2\x98\x81",     /* cloud */
         "\xF0\x9F\x9A\xA8", /* siren */
         "\xF0\x9F\x91\xA5", /* people */
+        "\xF0\x9F\x93\xA7", /* envelope */
+        "\xF0\x9F\x9B\x82", /* briefcase */
     };
     /* Categoria por modulo (solo cosmetica, define el color del boton):
      * refugio = atencion directa al animal, gestion = administrativo,
@@ -3561,7 +3805,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     const char *categorias_modulos[] = {
         "cat-refugio", "cat-refugio", "cat-refugio", "cat-gestion",
         "cat-gestion", "cat-sistema", "cat-sistema", "cat-gestion", "cat-refugio",
-        "cat-gestion",
+        "cat-gestion", "cat-gestion", "cat-gestion",
     };
     GCallback manejadores[] = {
         G_CALLBACK(on_mascotas_clicked),
@@ -3574,8 +3818,10 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         G_CALLBACK(on_respaldo_clicked),
         G_CALLBACK(on_alertas_clicked),
         G_CALLBACK(on_administrar_colaboradores_clicked),
+        G_CALLBACK(on_configurar_notificaciones_clicked),
+        G_CALLBACK(on_administrar_clientes_clicked),
     };
-    const int total_modulos = 10;
+    const int total_modulos = 12;
 
     DatosBotonModulo *datos_botones = g_malloc(sizeof(DatosBotonModulo));
     datos_botones->ventana_principal = ventana;
@@ -4006,11 +4252,9 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
     gtk_entry_set_visibility(GTK_ENTRY(e_password), FALSE);
     gtk_entry_set_input_purpose(GTK_ENTRY(e_password), GTK_INPUT_PURPOSE_PASSWORD);
 
-    GtkWidget *e_rol = gtk_combo_box_text_new();
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_rol), "0", "Jefe");
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_rol), "1", "Supervisor");
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_rol), "2", "Administrador");
-    gtk_combo_box_set_active(GTK_COMBO_BOX(e_rol), 0);
+    GtkWidget *e_telefono = gtk_entry_new();
+    gtk_entry_set_input_purpose(GTK_ENTRY(e_telefono), GTK_INPUT_PURPOSE_PHONE);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_telefono), "Ej: 50412345678 (con codigo de pais)");
 
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Nombre:"), 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), e_nombre, 1, 0, 1, 1);
@@ -4018,8 +4262,8 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
     gtk_grid_attach(GTK_GRID(grid), e_correo, 1, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Contrasena:"), 0, 2, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), e_password, 1, 2, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Tu rol en tu organizacion:"), 0, 3, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), e_rol, 1, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Telefono (WhatsApp):"), 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_telefono, 1, 3, 1, 1);
 
     gtk_widget_show_all(dialogo);
 
@@ -4028,10 +4272,15 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
         const char *nombre = gtk_entry_get_text(GTK_ENTRY(e_nombre));
         const char *correo = gtk_entry_get_text(GTK_ENTRY(e_correo));
         const char *password = gtk_entry_get_text(GTK_ENTRY(e_password));
-        const gchar *rol_id_texto = gtk_combo_box_get_active_id(GTK_COMBO_BOX(e_rol));
-        RolCliente rol_elegido = rol_id_texto ? (RolCliente)atoi(rol_id_texto) : ROL_CLIENTE_JEFE;
+        const char *telefono = gtk_entry_get_text(GTK_ENTRY(e_telefono));
+        /* Ya no se deja elegir el rol al registrarse: si cualquiera
+         * pudiera auto-asignarse el nivel mas alto, nadie elegiria uno
+         * mas bajo y la jerarquia no serviria de nada. Todo Cliente
+         * nuevo entra en el nivel base; el Administrador del refugio
+         * lo puede subir despues desde "Administrar Clientes". */
+        RolCliente rol_elegido = ROL_CLIENTE_JEFE;
         if (nombre[0] && correo[0] && password[0]) {
-            if (cliente_registrar(correo, password, nombre, rol_elegido) == 0
+            if (cliente_registrar(correo, password, nombre, telefono, rol_elegido) == 0
                 && cliente_autenticar(correo, password, cliente_out) == 0) {
                 creado = TRUE;
             } else {

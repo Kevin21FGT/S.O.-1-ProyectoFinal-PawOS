@@ -322,7 +322,11 @@ EOF
 cat > "$RAIZ/etc/sudoers.d/pawos-actualizar" << 'EOF'
 %pawos-refugio ALL=(ALL) NOPASSWD: /usr/bin/cp /opt/pawos-src/pawos-refugio-gui /usr/local/bin/pawos-refugio-gui.new, /usr/bin/cp /opt/pawos-src/pawos-refugio /usr/local/bin/pawos-refugio.new, /usr/bin/chmod 755 /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio.new, /usr/bin/mv -f /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio-gui, /usr/bin/mv -f /usr/local/bin/pawos-refugio.new /usr/local/bin/pawos-refugio
 EOF
-chmod 440 "$RAIZ/etc/sudoers.d/pawos-apagar" "$RAIZ/etc/sudoers.d/pawos-respaldo" "$RAIZ/etc/sudoers.d/pawos-actualizar"
+cat > "$RAIZ/etc/sudoers.d/pawos-notificaciones" << 'EOF'
+%pawos-admin ALL=(ALL) NOPASSWD: /usr/local/bin/pawos-configurar-notificaciones
+%pawos-refugio ALL=(ALL) NOPASSWD: /usr/local/bin/pawos-enviar-correo-cita, /usr/local/bin/pawos-enviar-whatsapp-cita
+EOF
+chmod 440 "$RAIZ/etc/sudoers.d/pawos-apagar" "$RAIZ/etc/sudoers.d/pawos-respaldo" "$RAIZ/etc/sudoers.d/pawos-actualizar" "$RAIZ/etc/sudoers.d/pawos-notificaciones"
 
 echo "=== 8. Script postinst (se corre solo al instalar el .deb) ==="
 cat > "$RAIZ/DEBIAN/postinst" << 'EOF'

@@ -340,6 +340,11 @@ cat > /etc/sudoers.d/pawos-actualizar << 'SUDOEOF3'
 %pawos-refugio ALL=(ALL) NOPASSWD: /usr/bin/cp /opt/pawos-src/pawos-refugio-gui /usr/local/bin/pawos-refugio-gui.new, /usr/bin/cp /opt/pawos-src/pawos-refugio /usr/local/bin/pawos-refugio.new, /usr/bin/chmod 755 /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio.new, /usr/bin/mv -f /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio-gui, /usr/bin/mv -f /usr/local/bin/pawos-refugio.new /usr/local/bin/pawos-refugio
 SUDOEOF3
 chmod 440 /etc/sudoers.d/pawos-actualizar
+cat > /etc/sudoers.d/pawos-notificaciones << 'SUDOEOF4'
+%pawos-admin ALL=(ALL) NOPASSWD: /usr/local/bin/pawos-configurar-notificaciones
+%pawos-refugio ALL=(ALL) NOPASSWD: /usr/local/bin/pawos-enviar-correo-cita, /usr/local/bin/pawos-enviar-whatsapp-cita
+SUDOEOF4
+chmod 440 /etc/sudoers.d/pawos-notificaciones
 echo "=== 8. Instalando servicios systemd ==="
 cat > /etc/systemd/system/pawos-monitoreo.service << 'EOF'
 [Unit]
