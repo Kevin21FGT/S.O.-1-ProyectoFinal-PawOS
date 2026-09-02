@@ -122,6 +122,8 @@ int  vacuna_actualizar(const Vacuna *v);
 int  vacuna_eliminar(int id);
 int  vacuna_listar(Vacuna **out, int *n);
 int  vacuna_pendientes(Vacuna **out, int *n); /* fecha_proxima <= hoy */
+int  vacuna_recordatorio_enviado(int id);
+int  vacuna_marcar_recordatorio_enviado(int id);
 
 /* ---------- Adopciones ---------- */
 int  adopcion_registrar(const Adopcion *a);

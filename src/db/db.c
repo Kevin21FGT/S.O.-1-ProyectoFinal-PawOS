@@ -188,6 +188,7 @@ int db_init(const char *ruta) {
     sqlite3_exec(g_db, "ALTER TABLE usuarios ADD COLUMN foto_base64 TEXT DEFAULT '';", NULL, NULL, NULL);
     sqlite3_exec(g_db, "ALTER TABLE clientes ADD COLUMN telefono TEXT DEFAULT '';", NULL, NULL, NULL);
     sqlite3_exec(g_db, "ALTER TABLE vacunas ADD COLUMN cliente_id INTEGER;", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "ALTER TABLE vacunas ADD COLUMN recordatorio_enviado INTEGER DEFAULT 0;", NULL, NULL, NULL);
     return 0;
 }
 
@@ -603,6 +604,7 @@ static int vacuna_query(const char *sql, Vacuna **out, int *n) {
         snprintf(v->fecha_proxima, sizeof(v->fecha_proxima), "%s", fp ? (const char*)fp : "");
         const unsigned char *obs = sqlite3_column_text(st, 5);
         snprintf(v->observaciones, sizeof(v->observaciones), "%s", obs ? (const char*)obs : "");
+        v->cliente_id = sqlite3_column_int(st, 6);
     }
     sqlite3_finalize(st);
     *out = arr;
@@ -612,7 +614,7 @@ static int vacuna_query(const char *sql, Vacuna **out, int *n) {
 
 int vacuna_listar(Vacuna **out, int *n) {
     return vacuna_query(
-        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones FROM vacunas ORDER BY fecha_proxima;",
+        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones,cliente_id FROM vacunas ORDER BY fecha_proxima;",
         out, n);
 }
 
@@ -623,9 +625,26 @@ int vacuna_pendientes(Vacuna **out, int *n) {
     char hoy[16];
     strftime(hoy, sizeof(hoy), "%Y-%m-%d", &tmv);
     snprintf(sql, sizeof(sql),
-        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones FROM vacunas "
+        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones,cliente_id FROM vacunas "
         "WHERE fecha_proxima IS NOT NULL AND fecha_proxima <= '%s' ORDER BY fecha_proxima;", hoy);
     return vacuna_query(sql, out, n);
+}
+int vacuna_recordatorio_enviado(int id) {
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, "SELECT recordatorio_enviado FROM vacunas WHERE id=?;", -1, &st, NULL) != SQLITE_OK) return 0;
+    sqlite3_bind_int(st, 1, id);
+    int enviado = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) enviado = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+    return enviado;
+}
+int vacuna_marcar_recordatorio_enviado(int id) {
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, "UPDATE vacunas SET recordatorio_enviado=1 WHERE id=?;", -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_int(st, 1, id);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
 }
 
 /* ---------------- Adopciones ---------------- */

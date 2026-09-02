@@ -82,4 +82,11 @@ else
   echo "  Recordatorio enviado."
 fi
 echo "======================================"
-read -p "Presiona Enter para cerrar..."
+# Solo pausa si hay una terminal real esperando (uso manual desde la
+# GUI, vía x-terminal-emulator). Cuando lo llama el servicio
+# automatico (pawos-vacunas-check, sin terminal) se omite, para no
+# quedar esperando un Enter que nunca va a llegar.
+if [ -t 0 ]; then
+  read -p "Presiona Enter para cerrar..."
+fi
+exit "$HUBO_ERROR"
