@@ -62,6 +62,13 @@ install -m 755 pawos-refugio        "$RAIZ/usr/local/bin/pawos-refugio"
 install -m 755 pawos-vacunas-check  "$RAIZ/usr/local/bin/pawos-vacunas-check"
 install -m 755 pawos-monitoreo      "$RAIZ/usr/local/bin/pawos-monitoreo"
 install -m 755 pawos-refugio-gui    "$RAIZ/usr/local/bin/pawos-refugio-gui"
+
+install -m 755 pawos-notificar-cita              "$RAIZ/usr/local/bin/pawos-notificar-cita"
+install -m 755 pawos-configurar-notificaciones   "$RAIZ/usr/local/bin/pawos-configurar-notificaciones"
+install -m 755 pawos-enviar-correo-cita          "$RAIZ/usr/local/bin/pawos-enviar-correo-cita"
+install -m 755 pawos-enviar-whatsapp-cita        "$RAIZ/usr/local/bin/pawos-enviar-whatsapp-cita"
+install -m 755 pawos-generar-pdf-cita.py         "$RAIZ/usr/local/bin/pawos-generar-pdf-cita.py"
+
 [ -f branding/pawos-icon.png ] && install -m 644 branding/pawos-icon.png "$RAIZ/usr/share/icons/pawos-icon.png"
 
 echo "=== 3. Control del paquete (DEBIAN/control) ==="

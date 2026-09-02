@@ -34,6 +34,14 @@ install -m 755 "$BINDIR/pawos-refugio"        /usr/local/bin/pawos-refugio
 install -m 755 "$BINDIR/pawos-vacunas-check"  /usr/local/bin/pawos-vacunas-check
 install -m 755 "$BINDIR/pawos-monitoreo"      /usr/local/bin/pawos-monitoreo
 install -m 755 "$BINDIR/pawos-refugio-gui"    /usr/local/bin/pawos-refugio-gui
+
+echo "=== 3b. Copiando scripts de recordatorio de citas (correo/WhatsApp) ==="
+install -m 755 "$BINDIR/pawos-notificar-cita"               /usr/local/bin/pawos-notificar-cita
+install -m 755 "$BINDIR/pawos-configurar-notificaciones"    /usr/local/bin/pawos-configurar-notificaciones
+install -m 755 "$BINDIR/pawos-enviar-correo-cita"            /usr/local/bin/pawos-enviar-correo-cita
+install -m 755 "$BINDIR/pawos-enviar-whatsapp-cita"          /usr/local/bin/pawos-enviar-whatsapp-cita
+install -m 755 "$BINDIR/pawos-generar-pdf-cita.py"           /usr/local/bin/pawos-generar-pdf-cita.py
+
 echo "=== 4. Creando script de respaldo a la nube (rclone) ==="
 install -d /usr/local/bin
 cat > /usr/local/bin/pawos-backup-nube << 'BACKUPEOF'
