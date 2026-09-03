@@ -62,6 +62,13 @@ install -m 755 pawos-refugio        "$RAIZ/usr/local/bin/pawos-refugio"
 install -m 755 pawos-vacunas-check  "$RAIZ/usr/local/bin/pawos-vacunas-check"
 install -m 755 pawos-monitoreo      "$RAIZ/usr/local/bin/pawos-monitoreo"
 install -m 755 pawos-refugio-gui    "$RAIZ/usr/local/bin/pawos-refugio-gui"
+
+install -m 755 pawos-notificar-cita              "$RAIZ/usr/local/bin/pawos-notificar-cita"
+install -m 755 pawos-configurar-notificaciones   "$RAIZ/usr/local/bin/pawos-configurar-notificaciones"
+install -m 755 pawos-enviar-correo-cita          "$RAIZ/usr/local/bin/pawos-enviar-correo-cita"
+install -m 755 pawos-enviar-whatsapp-cita        "$RAIZ/usr/local/bin/pawos-enviar-whatsapp-cita"
+install -m 755 pawos-generar-pdf-cita.py         "$RAIZ/usr/local/bin/pawos-generar-pdf-cita.py"
+
 [ -f branding/pawos-icon.png ] && install -m 644 branding/pawos-icon.png "$RAIZ/usr/share/icons/pawos-icon.png"
 
 echo "=== 3. Control del paquete (DEBIAN/control) ==="
@@ -71,7 +78,7 @@ Version: ${VERSION}
 Section: utils
 Priority: optional
 Architecture: ${ARCH}
-Depends: libgtk-3-0, libsqlite3-0, libncurses6, libcrypt1, python3, ufw, rclone
+Depends: libgtk-3-0, libsqlite3-0, libncurses6, libcrypt1, python3, python3-pip, ufw, rclone
 Maintainer: Kevin Fuentes <${email:-kevin@pawos.local}>
 Description: PawOS Refugio - Sistema de gestion para refugios de animales
  Sistema de gestion (GUI y consola) para refugios de animales:
@@ -322,7 +329,11 @@ EOF
 cat > "$RAIZ/etc/sudoers.d/pawos-actualizar" << 'EOF'
 %pawos-refugio ALL=(ALL) NOPASSWD: /usr/bin/cp /opt/pawos-src/pawos-refugio-gui /usr/local/bin/pawos-refugio-gui.new, /usr/bin/cp /opt/pawos-src/pawos-refugio /usr/local/bin/pawos-refugio.new, /usr/bin/chmod 755 /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio.new, /usr/bin/mv -f /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio-gui, /usr/bin/mv -f /usr/local/bin/pawos-refugio.new /usr/local/bin/pawos-refugio
 EOF
-chmod 440 "$RAIZ/etc/sudoers.d/pawos-apagar" "$RAIZ/etc/sudoers.d/pawos-respaldo" "$RAIZ/etc/sudoers.d/pawos-actualizar"
+cat > "$RAIZ/etc/sudoers.d/pawos-notificaciones" << 'EOF'
+%pawos-admin ALL=(ALL) NOPASSWD: /usr/local/bin/pawos-configurar-notificaciones
+%pawos-refugio ALL=(ALL) NOPASSWD: /usr/local/bin/pawos-enviar-correo-cita, /usr/local/bin/pawos-enviar-whatsapp-cita
+EOF
+chmod 440 "$RAIZ/etc/sudoers.d/pawos-apagar" "$RAIZ/etc/sudoers.d/pawos-respaldo" "$RAIZ/etc/sudoers.d/pawos-actualizar" "$RAIZ/etc/sudoers.d/pawos-notificaciones"
 
 echo "=== 8. Script postinst (se corre solo al instalar el .deb) ==="
 cat > "$RAIZ/DEBIAN/postinst" << 'EOF'
@@ -374,6 +385,9 @@ if [ -n "$USUARIO_REAL" ] && id "$USUARIO_REAL" &>/dev/null; then
     echo "Usuario '$USUARIO_REAL' agregado a los grupos pawos-admin y pawos-refugio."
     echo "IMPORTANTE: debe cerrar sesion y volver a entrar para que el cambio de grupo tome efecto."
 fi
+
+# fpdf2: genera el PDF del recordatorio de citas (correo/WhatsApp).
+pip3 install fpdf2 --break-system-packages || echo "AVISO: no se pudo instalar fpdf2. El PDF de citas no funcionara hasta correr: sudo pip3 install fpdf2 --break-system-packages"
 
 systemctl daemon-reload
 systemctl enable --now pawos-monitoreo.service || true

@@ -22,6 +22,7 @@ typedef struct {
     char fecha_aplicacion[16];
     char fecha_proxima[16];
     char observaciones[128]; /* notas libres sobre esta vacuna, opcional */
+    int  cliente_id; /* 0 = sin Cliente asignado para notificar */
 } Vacuna;
 
 typedef struct {
@@ -83,6 +84,7 @@ typedef struct {
     int        id;
     char       correo[128];
     char       nombre[64];
+    char       telefono[32];  /* numero de WhatsApp, opcional */
     RolCliente rol;
 } Cliente;
 
@@ -97,11 +99,13 @@ int  existe_admin(void);
 int  usuario_listar(UsuarioInfo **out, int *n);
 
 /* ---------- Clientes (publico externo: adoptantes y donantes) ---------- */
-int  cliente_registrar(const char *correo, const char *password, const char *nombre, RolCliente rol);
+int  cliente_registrar(const char *correo, const char *password, const char *nombre, const char *telefono, RolCliente rol);
 int  cliente_autenticar(const char *correo, const char *password, Cliente *out);
 int  cliente_existe(const char *correo);
 int  cliente_actualizar(int id, const char *nombre, const char *password_nueva);
+int  cliente_actualizar_rol(int id, RolCliente nuevo_rol);
 const char *cliente_rol_nombre(RolCliente rol);
+int  cliente_listar(Cliente **out, int *n);
 int  mascota_listar_disponibles(Mascota **out, int *n);
 
 /* ---------- Mascotas ---------- */
@@ -118,6 +122,8 @@ int  vacuna_actualizar(const Vacuna *v);
 int  vacuna_eliminar(int id);
 int  vacuna_listar(Vacuna **out, int *n);
 int  vacuna_pendientes(Vacuna **out, int *n); /* fecha_proxima <= hoy */
+int  vacuna_recordatorio_enviado(int id);
+int  vacuna_marcar_recordatorio_enviado(int id);
 
 /* ---------- Adopciones ---------- */
 int  adopcion_registrar(const Adopcion *a);
