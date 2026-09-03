@@ -1,0 +1,92 @@
+#!/bin/bash
+# pawos-notificar-cita - genera el PDF de una cita y lo manda por
+# correo y/o WhatsApp al Cliente. Lo llama el GUI (Agenda de Vacunas)
+# en una terminal aparte, despues de registrar una vacuna con un
+# Cliente seleccionado para notificar.
+#
+# Uso:
+#   pawos-notificar-cita "<correo>" "<telefono>" "<cliente>" "<mascota>" "<vacuna>" "<fecha>"
+# "<correo>" o "<telefono>" pueden venir vacios ("") si el Cliente no
+# tiene ese dato -- en ese caso simplemente se omite ese envio.
+
+set -e
+
+CORREO="$1"
+TELEFONO="$2"
+CLIENTE="$3"
+MASCOTA="$4"
+VACUNA="$5"
+FECHA="$6"
+
+echo "======================================"
+echo "   PawOS - Recordatorio de cita"
+echo "======================================"
+echo ""
+echo "Cliente: $CLIENTE"
+echo "Mascota: $MASCOTA"
+echo "Vacuna:  $VACUNA"
+echo "Fecha:   $FECHA"
+echo ""
+
+PDF="/tmp/pawos_cita_$$.pdf"
+
+echo "Generando PDF..."
+if ! python3 /usr/local/bin/pawos-generar-pdf-cita.py \
+    --cliente "$CLIENTE" --mascota "$MASCOTA" --vacuna "$VACUNA" --fecha "$FECHA" \
+    --salida "$PDF"; then
+  echo ""
+  echo "ERROR: no se pudo generar el PDF."
+  read -p "Presiona Enter para cerrar..."
+  exit 1
+fi
+
+HUBO_ERROR=0
+
+if [ -n "$CORREO" ]; then
+  echo ""
+  echo "Enviando correo a $CORREO..."
+  if sudo /usr/local/bin/pawos-enviar-correo-cita --para "$CORREO" --pdf "$PDF" \
+      --cliente "$CLIENTE" --mascota "$MASCOTA" --fecha "$FECHA"; then
+    echo "Correo enviado."
+  else
+    echo "ERROR: no se pudo enviar el correo."
+    HUBO_ERROR=1
+  fi
+else
+  echo ""
+  echo "(Este Cliente no tiene correo registrado, se omite el envio de correo.)"
+fi
+
+if [ -n "$TELEFONO" ]; then
+  echo ""
+  echo "Enviando WhatsApp a $TELEFONO..."
+  if sudo /usr/local/bin/pawos-enviar-whatsapp-cita --telefono "$TELEFONO" --pdf "$PDF" \
+      --cliente "$CLIENTE" --mascota "$MASCOTA" --fecha "$FECHA"; then
+    echo "WhatsApp enviado."
+  else
+    echo "ERROR: no se pudo enviar el WhatsApp."
+    HUBO_ERROR=1
+  fi
+else
+  echo ""
+  echo "(Este Cliente no tiene telefono registrado, se omite el envio de WhatsApp.)"
+fi
+
+rm -f "$PDF"
+
+echo ""
+echo "======================================"
+if [ "$HUBO_ERROR" = "1" ]; then
+  echo "  Terminado, con al menos un error arriba."
+else
+  echo "  Recordatorio enviado."
+fi
+echo "======================================"
+# Solo pausa si hay una terminal real esperando (uso manual desde la
+# GUI, vía x-terminal-emulator). Cuando lo llama el servicio
+# automatico (pawos-vacunas-check, sin terminal) se omite, para no
+# quedar esperando un Enter que nunca va a llegar.
+if [ -t 0 ]; then
+  read -p "Presiona Enter para cerrar..."
+fi
+exit "$HUBO_ERROR"

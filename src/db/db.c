@@ -186,6 +186,9 @@ int db_init(const char *ruta) {
     sqlite3_exec(g_db, "ALTER TABLE vacunas ADD COLUMN observaciones TEXT DEFAULT '';", NULL, NULL, NULL);
     sqlite3_exec(g_db, "ALTER TABLE clientes ADD COLUMN rol INTEGER NOT NULL DEFAULT 0;", NULL, NULL, NULL);
     sqlite3_exec(g_db, "ALTER TABLE usuarios ADD COLUMN foto_base64 TEXT DEFAULT '';", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "ALTER TABLE clientes ADD COLUMN telefono TEXT DEFAULT '';", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "ALTER TABLE vacunas ADD COLUMN cliente_id INTEGER;", NULL, NULL, NULL);
+    sqlite3_exec(g_db, "ALTER TABLE vacunas ADD COLUMN recordatorio_enviado INTEGER DEFAULT 0;", NULL, NULL, NULL);
     return 0;
 }
 
@@ -279,16 +282,42 @@ int usuario_listar(UsuarioInfo **out, int *n) {
 
 /* ---------------- Clientes (publico externo) ---------------- */
 
-int cliente_registrar(const char *correo, const char *password, const char *nombre, RolCliente rol) {
+/* Lista los Clientes registrados (id, correo, nombre, telefono, rol),
+ * usado para llenar el selector "Cliente a notificar" al registrar
+ * una vacuna/cita en Agenda de Vacunas. */
+int cliente_listar(Cliente **out, int *n) {
+    const char *sql = "SELECT id, correo, nombre, telefono, rol FROM clientes ORDER BY nombre;";
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    int cap = 8, cnt = 0;
+    Cliente *arr = malloc(sizeof(Cliente) * cap);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (cnt == cap) { cap *= 2; arr = realloc(arr, sizeof(Cliente) * cap); }
+        Cliente *c = &arr[cnt++];
+        c->id = sqlite3_column_int(st, 0);
+        snprintf(c->correo, sizeof(c->correo), "%s", (const char *)sqlite3_column_text(st, 1));
+        snprintf(c->nombre, sizeof(c->nombre), "%s", (const char *)sqlite3_column_text(st, 2));
+        const unsigned char *tel = sqlite3_column_text(st, 3);
+        snprintf(c->telefono, sizeof(c->telefono), "%s", tel ? (const char *)tel : "");
+        c->rol = (RolCliente)sqlite3_column_int(st, 4);
+    }
+    sqlite3_finalize(st);
+    *out = arr;
+    *n = cnt;
+    return 0;
+}
+
+int cliente_registrar(const char *correo, const char *password, const char *nombre, const char *telefono, RolCliente rol) {
     char hash[128];
     pawos_hash_password(password, hash, sizeof(hash));
-    const char *sql = "INSERT INTO clientes (correo, password, nombre, rol) VALUES (?,?,?,?);";
+    const char *sql = "INSERT INTO clientes (correo, password, nombre, telefono, rol) VALUES (?,?,?,?,?);";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_text(st, 1, correo, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 2, hash, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 3, nombre, -1, SQLITE_STATIC);
-    sqlite3_bind_int(st, 4, (int)rol);
+    sqlite3_bind_text(st, 4, telefono ? telefono : "", -1, SQLITE_STATIC);
+    sqlite3_bind_int(st, 5, (int)rol);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? 0 : -1;
@@ -320,6 +349,15 @@ const char *cliente_rol_nombre(RolCliente rol) {
         default: return "Jefe";
     }
 }
+int cliente_actualizar_rol(int id, RolCliente nuevo_rol) {
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, "UPDATE clientes SET rol=? WHERE id=?;", -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_int(st, 1, (int)nuevo_rol);
+    sqlite3_bind_int(st, 2, id);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
 
 /* Solo dice si el correo existe en la tabla clientes, sin revisar
  * contrasena -- se usa nada mas para mostrar un mensaje distinto en
@@ -335,7 +373,7 @@ int cliente_existe(const char *correo) {
 }
 
 int cliente_autenticar(const char *correo, const char *password, Cliente *out) {
-    const char *sql = "SELECT id, nombre, password, rol FROM clientes WHERE correo=?;";
+    const char *sql = "SELECT id, nombre, password, rol, telefono FROM clientes WHERE correo=?;";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_text(st, 1, correo, -1, SQLITE_STATIC);
@@ -345,6 +383,7 @@ int cliente_autenticar(const char *correo, const char *password, Cliente *out) {
         const unsigned char *nombre = sqlite3_column_text(st, 1);
         const unsigned char *hash_guardado = sqlite3_column_text(st, 2);
         int rol = sqlite3_column_int(st, 3);
+        const unsigned char *telefono = sqlite3_column_text(st, 4);
         if (hash_guardado) {
             char *resultado = crypt(password, (const char *)hash_guardado);
             if (resultado && strcmp(resultado, (const char *)hash_guardado) == 0) {
@@ -352,6 +391,7 @@ int cliente_autenticar(const char *correo, const char *password, Cliente *out) {
                     out->id = id;
                     snprintf(out->correo, sizeof(out->correo), "%s", correo);
                     snprintf(out->nombre, sizeof(out->nombre), "%s", nombre ? (const char *)nombre : "");
+                    snprintf(out->telefono, sizeof(out->telefono), "%s", telefono ? (const char *)telefono : "");
                     out->rol = (RolCliente)rol;
                 }
                 ok = 0;
@@ -482,8 +522,8 @@ int mascota_buscar_por_id(int id, Mascota *out) {
 
 int vacuna_agregar(const Vacuna *v) {
     const char *sql =
-        "INSERT INTO vacunas (mascota_id, nombre_vacuna, fecha_aplicacion, fecha_proxima, observaciones) "
-        "VALUES (?,?,?,?,?);";
+        "INSERT INTO vacunas (mascota_id, nombre_vacuna, fecha_aplicacion, fecha_proxima, observaciones, cliente_id) "
+        "VALUES (?,?,?,?,?,?);";
     sqlite3_stmt *st;
     if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_int(st, 1, v->mascota_id);
@@ -491,6 +531,11 @@ int vacuna_agregar(const Vacuna *v) {
     sqlite3_bind_text(st, 3, v->fecha_aplicacion, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 4, v->fecha_proxima, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 5, v->observaciones, -1, SQLITE_STATIC);
+    if (v->cliente_id > 0) {
+        sqlite3_bind_int(st, 6, v->cliente_id);
+    } else {
+        sqlite3_bind_null(st, 6);
+    }
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? 0 : -1;
@@ -559,6 +604,7 @@ static int vacuna_query(const char *sql, Vacuna **out, int *n) {
         snprintf(v->fecha_proxima, sizeof(v->fecha_proxima), "%s", fp ? (const char*)fp : "");
         const unsigned char *obs = sqlite3_column_text(st, 5);
         snprintf(v->observaciones, sizeof(v->observaciones), "%s", obs ? (const char*)obs : "");
+        v->cliente_id = sqlite3_column_int(st, 6);
     }
     sqlite3_finalize(st);
     *out = arr;
@@ -568,7 +614,7 @@ static int vacuna_query(const char *sql, Vacuna **out, int *n) {
 
 int vacuna_listar(Vacuna **out, int *n) {
     return vacuna_query(
-        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones FROM vacunas ORDER BY fecha_proxima;",
+        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones,cliente_id FROM vacunas ORDER BY fecha_proxima;",
         out, n);
 }
 
@@ -579,9 +625,26 @@ int vacuna_pendientes(Vacuna **out, int *n) {
     char hoy[16];
     strftime(hoy, sizeof(hoy), "%Y-%m-%d", &tmv);
     snprintf(sql, sizeof(sql),
-        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones FROM vacunas "
+        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones,cliente_id FROM vacunas "
         "WHERE fecha_proxima IS NOT NULL AND fecha_proxima <= '%s' ORDER BY fecha_proxima;", hoy);
     return vacuna_query(sql, out, n);
+}
+int vacuna_recordatorio_enviado(int id) {
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, "SELECT recordatorio_enviado FROM vacunas WHERE id=?;", -1, &st, NULL) != SQLITE_OK) return 0;
+    sqlite3_bind_int(st, 1, id);
+    int enviado = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) enviado = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+    return enviado;
+}
+int vacuna_marcar_recordatorio_enviado(int id) {
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(g_db, "UPDATE vacunas SET recordatorio_enviado=1 WHERE id=?;", -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_int(st, 1, id);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
 }
 
 /* ---------------- Adopciones ---------------- */

@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""
+pawos-enviar-whatsapp-cita
+
+Manda un PDF por WhatsApp (recordatorio de cita) usando Green API,
+leyendo las credenciales de /etc/pawos/notificaciones.conf:
+    GREENAPI_API_URL=https://7107.api.greenapi.com
+    GREENAPI_ID_INSTANCE=710722724914
+    GREENAPI_API_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Usa "curl" (no libreria adicional) para el envio multipart.
+
+Uso:
+    pawos-enviar-whatsapp-cita --telefono 50412345678 --pdf /ruta/cita.pdf \
+        --cliente "Juan Perez" --mascota "Firulais" --fecha "2026-09-15"
+"""
+
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+CONFIG_PATH = "/etc/pawos/notificaciones.conf"
+
+
+def leer_config():
+    config = {}
+    ruta = Path(CONFIG_PATH)
+    if not ruta.exists():
+        print(f"ERROR: no existe {CONFIG_PATH}. Configura primero WhatsApp desde PawOS Refugio (Admin).", file=sys.stderr)
+        sys.exit(1)
+    for linea in ruta.read_text(encoding="utf-8").splitlines():
+        linea = linea.strip()
+        if not linea or linea.startswith("#") or "=" not in linea:
+            continue
+        clave, valor = linea.split("=", 1)
+        config[clave.strip()] = valor.strip()
+    return config
+
+
+def limpiar_telefono(telefono):
+    """Deja solo digitos (Green API espera el numero sin '+', espacios ni guiones)."""
+    return re.sub(r"\D", "", telefono)
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--telefono", required=True, help="Numero de WhatsApp del Cliente, con codigo de pais")
+    p.add_argument("--pdf", required=True)
+    p.add_argument("--cliente", required=True)
+    p.add_argument("--mascota", required=True)
+    p.add_argument("--fecha", required=True)
+    p.add_argument("--refugio", default="PawOS Refugio")
+    args = p.parse_args()
+
+    config = leer_config()
+    api_url = config.get("GREENAPI_API_URL")
+    id_instance = config.get("GREENAPI_ID_INSTANCE")
+    api_token = config.get("GREENAPI_API_TOKEN")
+    if not api_url or not id_instance or not api_token:
+        print("ERROR: falta GREENAPI_API_URL, GREENAPI_ID_INSTANCE o GREENAPI_API_TOKEN en la configuracion.", file=sys.stderr)
+        sys.exit(1)
+
+    ruta_pdf = Path(args.pdf)
+    if not ruta_pdf.exists():
+        print(f"ERROR: no se encontro el PDF en {args.pdf}", file=sys.stderr)
+        sys.exit(1)
+
+    numero = limpiar_telefono(args.telefono)
+    if not numero:
+        print("ERROR: el telefono quedo vacio despues de limpiarlo.", file=sys.stderr)
+        sys.exit(1)
+    chat_id = f"{numero}@c.us"
+
+    caption = (
+        f"Hola {args.cliente}, este es un recordatorio de la proxima cita de "
+        f"{args.mascota}, programada para el {args.fecha}. -- {args.refugio}"
+    )
+
+    endpoint = f"{api_url}/waInstance{id_instance}/sendFileByUpload/{api_token}"
+
+    resultado = subprocess.run(
+        [
+            "curl", "--silent", "--show-error", "--fail",
+            "--location", endpoint,
+            "--form", f"chatId={chat_id}",
+            "--form", f"file=@{ruta_pdf}",
+            "--form", f"fileName={ruta_pdf.name}",
+            "--form", f"caption={caption}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if resultado.returncode != 0:
+        print(f"ERROR: no se pudo enviar el WhatsApp: {resultado.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"WhatsApp enviado a {numero}")
+    print(resultado.stdout.strip())
+
+
+if __name__ == "__main__":
+    main()

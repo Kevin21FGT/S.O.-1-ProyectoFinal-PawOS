@@ -21,7 +21,9 @@ if [ ! -f "$BASE/Makefile" ]; then
 fi
 echo "=== 1. Instalando dependencias de compilacion y sistema ==="
 apt-get update
-apt-get install -y build-essential libncurses-dev libsqlite3-dev nasm ufw libgtk-3-dev pkg-config libcrypt-dev python3 rclone
+apt-get install -y build-essential libncurses-dev libsqlite3-dev nasm ufw libgtk-3-dev pkg-config libcrypt-dev python3 python3-pip rclone
+# fpdf2: genera el PDF del recordatorio de citas (correo/WhatsApp).
+pip3 install fpdf2 --break-system-packages || echo "AVISO: no se pudo instalar fpdf2. El PDF de citas no funcionara hasta correr: sudo pip3 install fpdf2 --break-system-packages"
 echo "=== 2. Compilando PawOS desde el codigo fuente ==="
 cd "$BASE"
 make clean
@@ -34,6 +36,18 @@ install -m 755 "$BINDIR/pawos-refugio"        /usr/local/bin/pawos-refugio
 install -m 755 "$BINDIR/pawos-vacunas-check"  /usr/local/bin/pawos-vacunas-check
 install -m 755 "$BINDIR/pawos-monitoreo"      /usr/local/bin/pawos-monitoreo
 install -m 755 "$BINDIR/pawos-refugio-gui"    /usr/local/bin/pawos-refugio-gui
+
+echo "=== 3a. Instalando el icono de la app ==="
+mkdir -p /usr/share/icons
+[ -f "$BINDIR/branding/pawos-icon.png" ] && install -m 644 "$BINDIR/branding/pawos-icon.png" /usr/share/icons/pawos-icon.png
+
+echo "=== 3b. Copiando scripts de recordatorio de citas (correo/WhatsApp) ==="
+install -m 755 "$BINDIR/pawos-notificar-cita"               /usr/local/bin/pawos-notificar-cita
+install -m 755 "$BINDIR/pawos-configurar-notificaciones"    /usr/local/bin/pawos-configurar-notificaciones
+install -m 755 "$BINDIR/pawos-enviar-correo-cita"            /usr/local/bin/pawos-enviar-correo-cita
+install -m 755 "$BINDIR/pawos-enviar-whatsapp-cita"          /usr/local/bin/pawos-enviar-whatsapp-cita
+install -m 755 "$BINDIR/pawos-generar-pdf-cita.py"           /usr/local/bin/pawos-generar-pdf-cita.py
+
 echo "=== 4. Creando script de respaldo a la nube (rclone) ==="
 install -d /usr/local/bin
 cat > /usr/local/bin/pawos-backup-nube << 'BACKUPEOF'
@@ -340,6 +354,11 @@ cat > /etc/sudoers.d/pawos-actualizar << 'SUDOEOF3'
 %pawos-refugio ALL=(ALL) NOPASSWD: /usr/bin/cp /opt/pawos-src/pawos-refugio-gui /usr/local/bin/pawos-refugio-gui.new, /usr/bin/cp /opt/pawos-src/pawos-refugio /usr/local/bin/pawos-refugio.new, /usr/bin/chmod 755 /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio.new, /usr/bin/mv -f /usr/local/bin/pawos-refugio-gui.new /usr/local/bin/pawos-refugio-gui, /usr/bin/mv -f /usr/local/bin/pawos-refugio.new /usr/local/bin/pawos-refugio
 SUDOEOF3
 chmod 440 /etc/sudoers.d/pawos-actualizar
+cat > /etc/sudoers.d/pawos-notificaciones << 'SUDOEOF4'
+%pawos-admin ALL=(ALL) NOPASSWD: /usr/local/bin/pawos-configurar-notificaciones
+%pawos-refugio ALL=(ALL) NOPASSWD: /usr/local/bin/pawos-enviar-correo-cita, /usr/local/bin/pawos-enviar-whatsapp-cita
+SUDOEOF4
+chmod 440 /etc/sudoers.d/pawos-notificaciones
 echo "=== 8. Instalando servicios systemd ==="
 cat > /etc/systemd/system/pawos-monitoreo.service << 'EOF'
 [Unit]
@@ -416,7 +435,7 @@ Name=PawOS Refugio (GUI)
 Comment=Sistema de gestion para refugio de animales
 Exec=/usr/local/bin/pawos-refugio-gui
 Terminal=false
-Icon=utilities-terminal
+Icon=/usr/share/icons/pawos-icon.png
 Categories=Utility;
 EOF
 cat > /usr/share/applications/pawos-apagar.desktop << 'EOF'
