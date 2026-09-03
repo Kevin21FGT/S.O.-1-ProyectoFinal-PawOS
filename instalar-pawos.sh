@@ -21,7 +21,9 @@ if [ ! -f "$BASE/Makefile" ]; then
 fi
 echo "=== 1. Instalando dependencias de compilacion y sistema ==="
 apt-get update
-apt-get install -y build-essential libncurses-dev libsqlite3-dev nasm ufw libgtk-3-dev pkg-config libcrypt-dev python3 rclone
+apt-get install -y build-essential libncurses-dev libsqlite3-dev nasm ufw libgtk-3-dev pkg-config libcrypt-dev python3 python3-pip rclone
+# fpdf2: genera el PDF del recordatorio de citas (correo/WhatsApp).
+pip3 install fpdf2 --break-system-packages || echo "AVISO: no se pudo instalar fpdf2. El PDF de citas no funcionara hasta correr: sudo pip3 install fpdf2 --break-system-packages"
 echo "=== 2. Compilando PawOS desde el codigo fuente ==="
 cd "$BASE"
 make clean

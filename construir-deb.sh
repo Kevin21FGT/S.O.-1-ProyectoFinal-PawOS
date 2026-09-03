@@ -78,7 +78,7 @@ Version: ${VERSION}
 Section: utils
 Priority: optional
 Architecture: ${ARCH}
-Depends: libgtk-3-0, libsqlite3-0, libncurses6, libcrypt1, python3, ufw, rclone
+Depends: libgtk-3-0, libsqlite3-0, libncurses6, libcrypt1, python3, python3-pip, ufw, rclone
 Maintainer: Kevin Fuentes <${email:-kevin@pawos.local}>
 Description: PawOS Refugio - Sistema de gestion para refugios de animales
  Sistema de gestion (GUI y consola) para refugios de animales:
@@ -385,6 +385,9 @@ if [ -n "$USUARIO_REAL" ] && id "$USUARIO_REAL" &>/dev/null; then
     echo "Usuario '$USUARIO_REAL' agregado a los grupos pawos-admin y pawos-refugio."
     echo "IMPORTANTE: debe cerrar sesion y volver a entrar para que el cambio de grupo tome efecto."
 fi
+
+# fpdf2: genera el PDF del recordatorio de citas (correo/WhatsApp).
+pip3 install fpdf2 --break-system-packages || echo "AVISO: no se pudo instalar fpdf2. El PDF de citas no funcionara hasta correr: sudo pip3 install fpdf2 --break-system-packages"
 
 systemctl daemon-reload
 systemctl enable --now pawos-monitoreo.service || true
