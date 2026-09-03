@@ -43,6 +43,12 @@
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
 #define ID_PROCESO_DEMO 1u
 
+/* Prototipo adelantado: la implementacion completa (con el fundido de
+ * opacidad) esta mas abajo, junto a aplicar_estilos(); se declara aqui
+ * porque varios dialogos auxiliares de esta seccion (como
+ * pedir_entero_dialog) ya la usan mas arriba en el archivo. */
+static void mostrar_con_fundido(GtkWidget *ventana);
+
 /* ---------------------------------------------------------------
  * Utilidades comunes
  * --------------------------------------------------------------- */
@@ -87,7 +93,7 @@ static gboolean pedir_entero_dialog(GtkWindow *padre, const char *titulo, const 
     gtk_container_add(GTK_CONTAINER(area), caja);
 
     gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_OK);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     gboolean ok = FALSE;
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
@@ -151,7 +157,7 @@ static gboolean seleccionar_mascota_dialog(GtkWindow *padre, int *id_out) {
     gtk_container_add(GTK_CONTAINER(scroll), treeview);
     gtk_box_pack_start(GTK_BOX(area), scroll, TRUE, TRUE, 0);
 
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     gboolean ok = FALSE;
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
@@ -215,7 +221,7 @@ static gboolean pedir_mascota_id_dialog(GtkWindow *padre, const char *titulo, co
     gtk_container_add(GTK_CONTAINER(area), caja);
 
     gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_OK);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     gboolean ok = FALSE;
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
@@ -245,6 +251,30 @@ static GtkCssProvider *g_proveedor_estilos = NULL;
  * (GNOME, XFCE, etc. la sincronizan via GtkSettings). Como respaldo,
  * tambien revisa si el nombre del tema activo contiene "dark". */
 static gboolean modo_oscuro_activo(void) {
+    /* Fuente principal: la preferencia real de GNOME moderno
+     * (Configuracion > Apariencia > Oscuro). Se guarda en
+     * org.gnome.desktop.interface/color-scheme -- NO en
+     * gtk-application-prefer-dark-theme ni en gtk-theme-name (las que
+     * se revisaban antes; por eso nunca se detectaba el cambio, ni
+     * siquiera reabriendo la app). */
+    GSettingsSchemaSource *fuente = g_settings_schema_source_get_default();
+    if (fuente) {
+        GSettingsSchema *esquema = g_settings_schema_source_lookup(
+            fuente, "org.gnome.desktop.interface", TRUE);
+        if (esquema) {
+            g_settings_schema_unref(esquema);
+            GSettings *ajustes = g_settings_new("org.gnome.desktop.interface");
+            gchar *esquema_color = g_settings_get_string(ajustes, "color-scheme");
+            gboolean prefiere_oscuro_gnome =
+                (esquema_color != NULL && strcmp(esquema_color, "prefer-dark") == 0);
+            g_free(esquema_color);
+            g_object_unref(ajustes);
+            if (prefiere_oscuro_gnome) return TRUE;
+        }
+    }
+
+    /* Respaldo para escritorios sin ese ajuste de GNOME (XFCE, etc.):
+     * la preferencia clasica de GTK. */
     GtkSettings *settings = gtk_settings_get_default();
     if (!settings) return FALSE;
 
@@ -265,20 +295,38 @@ static gboolean modo_oscuro_activo(void) {
 static void aplicar_estilos(void) {
     gboolean oscuro = modo_oscuro_activo();
 
-    const char *fondo_ventana    = oscuro ? "#1B211C" : "#EDF2EA";
+    const char *fondo_ventana    = oscuro ? "#1B211C" : "#F2F3F5";
     const char *color_texto      = oscuro ? "#E7ECE4" : "#1C2620";
-    const char *fondo_dialogo    = oscuro ? "#232B24" : "#F7FAF6";
+    const char *fondo_dialogo    = oscuro ? "#232B24" : "#FFFFFF";
     const char *fondo_tabla      = oscuro ? "#20271F" : "#FFFFFF";
     const char *texto_tabla      = oscuro ? "#E7ECE4" : "#1C2620";
     const char *seleccion_bg     = oscuro ? "#2E6B3F" : "#BFE6C9";
     const char *seleccion_fg     = oscuro ? "#F2F8F0" : "#103018";
     const char *deshabilitado_bg = oscuro ? "#3A423B" : "#CBD3C7";
     const char *deshabilitado_fg = oscuro ? "#8B948B" : "#7C877A";
+    const char *boton_bg         = oscuro ? "#2A322B" : "#FFFFFF";
+    const char *boton_bg_hover   = oscuro ? "#354039" : "#F2F3F5";
+    const char *boton_fg         = oscuro ? "#E7ECE4" : "#1C2620";
+    const char *boton_borde      = oscuro ? "#3A443B" : "#D7DEDA";
 
     gchar *css = g_strdup_printf(
         /* Fondo general de la app */
         "window { background-color: %s; }"
         "label { color: %s; }"
+
+        /* Barra de titulo automatica de GTK (no hay una propia
+         * definida): sin esto se queda blanca aunque todo lo demas
+         * cambie de modo. */
+        "headerbar, .titlebar, decoration {"
+        "  background-color: %s;"
+        "  background-image: none;"
+        "  color: %s;"
+        "}"
+        "headerbar button, .titlebar button, decoration button {"
+        "  background-color: %s;"
+        "  background-image: none;"
+        "  color: %s;"
+        "}"
 
         /* Banner de encabezado (ventana principal): degradado verde bosque,
          * igual en ambos modos porque es un color de marca, no de fondo. */
@@ -302,12 +350,19 @@ static void aplicar_estilos(void) {
         ".badge-rescatista    { background-color: #C1440E; color: #FFFFFF; }"
         ".badge-recepcionista { background-color: #7A4FA3; color: #FFFFFF; }"
 
-        /* Botones generales */
+        /* Botones generales (los que no tienen .modulo/.salir/.cat-* --
+         * necesitan su propio fondo/texto segun el modo, si no el texto
+         * queda invisible sobre un fondo que nunca cambia). */
         "button {"
         "  padding: 10px;"
         "  border-radius: 10px;"
         "  transition: 150ms ease-in-out;"
+        "  background-color: %s;"
+        "  background-image: none;"
+        "  color: %s;"
+        "  border: 1px solid %s;"
         "}"
+        "button:hover { background-color: %s; }"
         "button.modulo {"
         "  color: #FFFFFF;"
         "  font-weight: bold;"
@@ -342,15 +397,55 @@ static void aplicar_estilos(void) {
         "}"
         "treeview:selected, treeview.view:selected { background-color: %s; color: %s; }"
 
+        /* Menu desplegable de los combo box (ej. el filtro
+         * Texto/PDF del dialogo de guardar, o cualquier otro combo de
+         * la app): tiene su propio nodo CSS, no hereda nada de
+         * "dialog" ni "window". */
+        "menu, .menu {"
+        "  background-color: %s;"
+        "  color: %s;"
+        "}"
+        "menuitem {"
+        "  color: %s;"
+        "}"
+
         /* Dialogos y campos de texto */
-        "dialog { background-color: %s; }"
-        "entry, textview, textview text { background-color: %s; color: %s; }",
+        "dialog, dialog box, pathbar, .path-bar, placesview,"
+        "dialog scrolledwindow, dialog viewport, dialog list, dialog stack {"
+        "  background-color: %s;"
+        "}"
+        "entry, textview, textview text {"
+        "  background-color: %s; color: %s;"
+        "  border: 1px solid %s;"
+        "  border-radius: 6px;"
+        "  transition: 150ms ease-in-out;"
+        "}"
+        "entry:focus, textview:focus {"
+        "  border-color: #23924B;"
+        "}"
+
+        /* Panel lateral de "favoritos" (Carpeta personal, Descargas,
+         * etc.) de los dialogos nativos de Abrir/Guardar: usa su
+         * propio nodo CSS (placessidebar / .sidebar) que no hereda el
+         * fondo de "dialog", por eso se quedaba blanco aunque el
+         * resto del dialogo si cambiara de modo. */
+        "placessidebar, .sidebar {"
+        "  background-color: %s;"
+        "}"
+        "placessidebar row, .sidebar row {"
+        "  color: %s;"
+        "}",
         fondo_ventana, color_texto,
+        fondo_ventana, color_texto,
+        boton_bg, boton_fg,
+        boton_bg, boton_fg, boton_borde, boton_bg_hover,
         deshabilitado_bg, deshabilitado_fg,
         fondo_tabla, texto_tabla,
         seleccion_bg, seleccion_fg,
         fondo_dialogo,
-        fondo_dialogo, color_texto);
+        fondo_dialogo, color_texto, boton_borde,
+        fondo_dialogo, color_texto,
+        fondo_dialogo, color_texto, color_texto);
 
     if (g_proveedor_estilos) {
         gtk_style_context_remove_provider_for_screen(
@@ -376,6 +471,55 @@ static void on_cambio_tema_sistema(GObject *obj, GParamSpec *pspec, gpointer dat
     (void)pspec;
     (void)datos;
     aplicar_estilos();
+}
+
+/* Icono de "ojo" para mostrar/ocultar el texto de un campo de
+ * contrasena, reutilizable en todos los formularios de la app (login,
+ * registro, configuracion de notificaciones, etc.). Al hacer clic en
+ * el icono alterna gtk_entry_set_visibility() y cambia el icono para
+ * reflejar el estado actual. */
+static void on_click_icono_ver_password(GtkEntry *entrada, GtkEntryIconPosition posicion,
+                                          GdkEvent *evento, gpointer datos) {
+    (void)evento;
+    (void)datos;
+    if (posicion != GTK_ENTRY_ICON_SECONDARY) return;
+    gboolean visible = gtk_entry_get_visibility(entrada);
+    gtk_entry_set_visibility(entrada, !visible);
+    gtk_entry_set_icon_from_icon_name(entrada, GTK_ENTRY_ICON_SECONDARY,
+        !visible ? "view-conceal-symbolic" : "view-reveal-symbolic");
+}
+
+static void agregar_boton_ver_password(GtkWidget *entrada) {
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(entrada), GTK_ENTRY_ICON_SECONDARY,
+                                       "view-reveal-symbolic");
+    gtk_entry_set_icon_tooltip_text(GTK_ENTRY(entrada), GTK_ENTRY_ICON_SECONDARY,
+                                     "Mostrar/ocultar contrasena");
+    g_signal_connect(entrada, "icon-press", G_CALLBACK(on_click_icono_ver_password), NULL);
+}
+
+/* Fundido de entrada (fade-in) para ventanas y dialogos: en vez de
+ * aparecer de golpe, la opacidad sube de 0 a 1 en unos pocos pasos
+ * (~100ms). El temporizador se apaga solo (G_SOURCE_REMOVE) al llegar
+ * a opacidad completa -- no queda nada corriendo de fondo. Se guarda
+ * una referencia (g_object_ref) mientras dura la animacion para que no
+ * truene si el usuario alcanza a cerrar la ventana antes de que
+ * termine. */
+static gboolean fundido_tick(gpointer datos) {
+    GtkWidget *widget = GTK_WIDGET(datos);
+    gdouble opacidad = gtk_widget_get_opacity(widget) + 0.15;
+    if (opacidad >= 1.0) {
+        gtk_widget_set_opacity(widget, 1.0);
+        g_object_unref(widget);
+        return G_SOURCE_REMOVE;
+    }
+    gtk_widget_set_opacity(widget, opacidad);
+    return G_SOURCE_CONTINUE;
+}
+
+static void mostrar_con_fundido(GtkWidget *ventana) {
+    gtk_widget_set_opacity(ventana, 0.0);
+    gtk_widget_show_all(ventana);
+    g_timeout_add(15, fundido_tick, g_object_ref(ventana));
 }
 
 /* =================================================================
@@ -467,7 +611,7 @@ static void on_registrar_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_edad, 1, 3, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Mascota m;
@@ -515,7 +659,7 @@ static void on_cambiar_estado_clicked(GtkButton *boton, gpointer datos) {
     gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
     gtk_container_set_border_width(GTK_CONTAINER(combo), 12);
     gtk_container_add(GTK_CONTAINER(area), combo);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         gchar *nuevo = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo));
@@ -634,7 +778,7 @@ static void abrir_pantalla_mascotas(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_mascotas(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -755,7 +899,7 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_cliente, 1, 4, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Vacuna v;
@@ -882,7 +1026,7 @@ static void abrir_pantalla_vacunas(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_vacunas(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -970,7 +1114,7 @@ static void on_registrar_adopcion_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_contacto, 1, 1, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Adopcion a;
@@ -1044,7 +1188,7 @@ static void abrir_pantalla_adopciones(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_adopciones(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -1130,7 +1274,7 @@ static void on_registrar_donante_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_monto, 1, 2, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Donante d;
@@ -1209,7 +1353,7 @@ static void abrir_pantalla_donantes(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_donantes(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -1676,7 +1820,7 @@ static void abrir_pantalla_reportes(GtkWidget *padre, Rol rol) {
     g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -1761,7 +1905,7 @@ static void on_terminar_proceso_clicked(GtkButton *boton, gpointer datos) {
     gtk_box_pack_start(GTK_BOX(caja), e_pid, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(caja), chk_forzar, FALSE, FALSE, 0);
     gtk_container_add(GTK_CONTAINER(area), caja);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         int pid = atoi(gtk_entry_get_text(GTK_ENTRY(e_pid)));
@@ -1843,7 +1987,7 @@ static void abrir_pantalla_procesos(GtkWidget *padre) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_procesos(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -2049,7 +2193,7 @@ static void abrir_pantalla_memoria(GtkWidget *padre) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     actualizar_estadisticas_memoria(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -2547,7 +2691,7 @@ static void on_respaldar_ahora_clicked(GtkButton *boton, gpointer datos) {
     gtk_container_add(GTK_CONTAINER(area), caja);
 
     gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_OK);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     int respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
     char etiqueta_buf[64] = "";
@@ -2766,7 +2910,7 @@ static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
     actualizar_estado_respaldo(ctx);
     actualizar_ui_modo_respaldo(ctx);
     cargar_historial_respaldos(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -2920,7 +3064,7 @@ static void on_registrar_alerta_prueba_clicked(GtkButton *boton, gpointer datos)
     gtk_grid_attach(GTK_GRID(cuadricula), e_valor, 1, 3, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Alerta a;
@@ -3021,7 +3165,7 @@ static void abrir_pantalla_alertas(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_alertas(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -3150,6 +3294,11 @@ static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
     GtkWidget *dialogo_buscando = gtk_message_dialog_new(
         padre, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_NONE,
         "Buscando actualizaciones...");
+    GtkWidget *spinner_buscando = gtk_spinner_new();
+    gtk_spinner_start(GTK_SPINNER(spinner_buscando));
+    gtk_box_pack_start(
+        GTK_BOX(gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialogo_buscando))),
+        spinner_buscando, FALSE, FALSE, 6);
     gtk_widget_show_all(dialogo_buscando);
     while (gtk_events_pending()) gtk_main_iteration();
 
@@ -3255,7 +3404,7 @@ static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
     }
     g_strfreev(lineas);
 
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
     gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
     gtk_widget_destroy(dialogo);
 
@@ -3268,6 +3417,52 @@ static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
             if (error_terminal) g_error_free(error_terminal);
         }
     }
+}
+
+/* Dialogo "Acerca de": version (de include/version.h), descripcion
+ * breve y creditos. Solo informativo, no lee ni escribe nada. */
+static void on_acerca_de_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    GtkWindow *padre = (d && d->ventana_principal) ? GTK_WINDOW(d->ventana_principal) : NULL;
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Acerca de PawOS Refugio", padre, GTK_DIALOG_MODAL,
+        "_Cerrar", GTK_RESPONSE_CLOSE, NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dialogo), 380, -1);
+
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 18);
+    gtk_container_add(GTK_CONTAINER(area), caja);
+
+    GtkWidget *titulo = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(titulo),
+        "<span size='x-large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
+    gtk_widget_set_halign(titulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+    gchar *texto_version = g_strdup_printf("Version %s", PAWOS_VERSION);
+    GtkWidget *lbl_version = gtk_label_new(texto_version);
+    g_free(texto_version);
+    gtk_widget_set_halign(lbl_version, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl_version, FALSE, FALSE, 0);
+
+    GtkWidget *lbl_desc = gtk_label_new(
+        "Sistema de gestion para refugios de animales: mascotas, "
+        "vacunas, adopciones, donantes y recordatorios automaticos "
+        "de citas por correo y WhatsApp.");
+    gtk_label_set_line_wrap(GTK_LABEL(lbl_desc), TRUE);
+    gtk_widget_set_halign(lbl_desc, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl_desc, FALSE, FALSE, 8);
+
+    GtkWidget *lbl_creditos = gtk_label_new("Proyecto Final de Sistemas Operativos.");
+    gtk_widget_set_halign(lbl_creditos, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl_creditos, FALSE, FALSE, 0);
+
+    mostrar_con_fundido(dialogo);
+    gtk_dialog_run(GTK_DIALOG(dialogo));
+    gtk_widget_destroy(dialogo);
 }
 
 /* ---------------- Administrar Colaboradores (solo Admin) ---------------- */
@@ -3378,6 +3573,7 @@ static void mostrar_formulario_nuevo_colaborador(ContextoColaboradores *ctx) {
     gtk_widget_set_halign(lbl_pass, GTK_ALIGN_END);
     GtkWidget *entrada_pass = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(entrada_pass), FALSE);
+    agregar_boton_ver_password(entrada_pass);
     gtk_entry_set_input_purpose(GTK_ENTRY(entrada_pass), GTK_INPUT_PURPOSE_PASSWORD);
     gtk_grid_attach(GTK_GRID(grid), lbl_pass, 0, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entrada_pass, 1, 1, 1, 1);
@@ -3413,7 +3609,7 @@ static void mostrar_formulario_nuevo_colaborador(ContextoColaboradores *ctx) {
     gtk_entry_set_activates_default(GTK_ENTRY(entrada_pass), TRUE);
     gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_ACCEPT);
 
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
     gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
 
     if (respuesta == GTK_RESPONSE_ACCEPT) {
@@ -3494,7 +3690,7 @@ static void abrir_pantalla_administrar_colaboradores(GtkWindow *padre, Rol rol) 
     gtk_box_pack_start(GTK_BOX(caja), btn_cerrar, FALSE, FALSE, 0);
     g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
 
-    gtk_widget_show_all(ventana);
+    mostrar_con_fundido(ventana);
 }
 
 static void on_administrar_colaboradores_clicked(GtkButton *boton, gpointer datos) {
@@ -3555,7 +3751,7 @@ static void on_cambiar_rol_cliente_clicked(GtkButton *boton, gpointer datos) {
     gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
     gtk_container_set_border_width(GTK_CONTAINER(combo), 12);
     gtk_container_add(GTK_CONTAINER(area), combo);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         const gchar *id_texto = gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo));
@@ -3624,7 +3820,7 @@ static void on_administrar_clientes_clicked(GtkButton *boton, gpointer datos) {
     g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
     gtk_box_pack_start(GTK_BOX(caja), btn_cerrar, FALSE, FALSE, 0);
 
-    gtk_widget_show_all(ventana);
+    mostrar_con_fundido(ventana);
 }
 
 /* Pantalla de Administrador para guardar las credenciales de correo
@@ -3664,6 +3860,7 @@ static void on_configurar_notificaciones_clicked(GtkButton *boton, gpointer dato
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_gmail_user), "correo@gmail.com");
     GtkWidget *e_gmail_pass = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(e_gmail_pass), FALSE);
+    agregar_boton_ver_password(e_gmail_pass);
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_gmail_pass), "Contrasena de aplicacion (16 caracteres)");
     GtkWidget *e_green_url = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_green_url), "https://XXXX.api.greenapi.com");
@@ -3671,6 +3868,7 @@ static void on_configurar_notificaciones_clicked(GtkButton *boton, gpointer dato
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_green_id), "idInstance");
     GtkWidget *e_green_token = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(e_green_token), FALSE);
+    agregar_boton_ver_password(e_green_token);
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_green_token), "apiTokenInstance");
 
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Correo Gmail:"), 0, 1, 1, 1);
@@ -3684,7 +3882,7 @@ static void on_configurar_notificaciones_clicked(GtkButton *boton, gpointer dato
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Green API apiToken:"), 0, 5, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), e_green_token, 1, 5, 1, 1);
 
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         const char *gmail_user = gtk_entry_get_text(GTK_ENTRY(e_gmail_user));
         const char *gmail_pass = gtk_entry_get_text(GTK_ENTRY(e_gmail_pass));
@@ -3855,6 +4053,12 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     gtk_box_pack_start(GTK_BOX(caja), btn_actualizar, FALSE, FALSE, 0);
     g_signal_connect(btn_actualizar, "clicked", G_CALLBACK(on_actualizar_clicked), datos_botones);
 
+    GtkWidget *btn_acerca_de = gtk_button_new_with_label("Acerca de");
+    gtk_widget_set_size_request(btn_acerca_de, 250, 46);
+    gtk_widget_set_halign(btn_acerca_de, GTK_ALIGN_CENTER);
+    gtk_box_pack_start(GTK_BOX(caja), btn_acerca_de, FALSE, FALSE, 0);
+    g_signal_connect(btn_acerca_de, "clicked", G_CALLBACK(on_acerca_de_clicked), datos_botones);
+
     GtkWidget *btn_salir = gtk_button_new_with_label("Salir");
     gtk_style_context_add_class(gtk_widget_get_style_context(btn_salir), "salir");
     gtk_widget_set_size_request(btn_salir, 250, 46);
@@ -3862,7 +4066,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     gtk_box_pack_start(GTK_BOX(caja), btn_salir, FALSE, FALSE, 0);
     g_signal_connect_swapped(btn_salir, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
 
-    gtk_widget_show_all(ventana);
+    mostrar_con_fundido(ventana);
 }
 
 /* ---------------------------------------------------------------
@@ -3968,7 +4172,7 @@ static void on_solicitar_adopcion_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_contacto, 1, 1, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Adopcion a;
@@ -4014,7 +4218,7 @@ static void on_hacer_donacion_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_monto, 1, 1, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Donante d;
@@ -4096,7 +4300,7 @@ static void on_ver_mis_solicitudes_clicked(GtkButton *boton, gpointer datos) {
     gtk_label_set_markup(GTK_LABEL(lbl), texto->str);
     g_string_free(texto, TRUE);
 
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
     gtk_dialog_run(GTK_DIALOG(dialogo));
     gtk_widget_destroy(dialogo);
 }
@@ -4121,6 +4325,7 @@ static void on_editar_cuenta_clicked(GtkButton *boton, gpointer datos) {
     gtk_entry_set_text(GTK_ENTRY(e_nombre), ctx->nombre_cliente);
     GtkWidget *e_password = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(e_password), FALSE);
+    agregar_boton_ver_password(e_password);
     gtk_entry_set_input_purpose(GTK_ENTRY(e_password), GTK_INPUT_PURPOSE_PASSWORD);
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_password), "(dejar en blanco para no cambiarla)");
 
@@ -4130,7 +4335,7 @@ static void on_editar_cuenta_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_password, 1, 1, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         const char *nombre_nuevo = gtk_entry_get_text(GTK_ENTRY(e_nombre));
@@ -4225,7 +4430,7 @@ static void construir_ventana_cliente(const Cliente *cliente) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
     cargar_mascotas_disponibles(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* Formulario para crear una cuenta de Cliente nueva (correo, nombre,
@@ -4250,6 +4455,7 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
     GtkWidget *e_correo = gtk_entry_new();
     GtkWidget *e_password = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(e_password), FALSE);
+    agregar_boton_ver_password(e_password);
     gtk_entry_set_input_purpose(GTK_ENTRY(e_password), GTK_INPUT_PURPOSE_PASSWORD);
 
     GtkWidget *e_telefono = gtk_entry_new();
@@ -4265,7 +4471,7 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Telefono (WhatsApp):"), 0, 3, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), e_telefono, 1, 3, 1, 1);
 
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     gboolean creado = FALSE;
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_ACCEPT) {
@@ -4337,6 +4543,7 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
         gtk_widget_set_halign(lbl_password, GTK_ALIGN_END);
         GtkWidget *entrada_password = gtk_entry_new();
         gtk_entry_set_visibility(GTK_ENTRY(entrada_password), FALSE);
+        agregar_boton_ver_password(entrada_password);
         gtk_entry_set_input_purpose(GTK_ENTRY(entrada_password), GTK_INPUT_PURPOSE_PASSWORD);
         gtk_grid_attach(GTK_GRID(grid), lbl_password, 0, 1, 1, 1);
         gtk_grid_attach(GTK_GRID(grid), entrada_password, 1, 1, 1, 1);
@@ -4360,7 +4567,7 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
             gtk_box_pack_start(GTK_BOX(caja), lbl_error, FALSE, FALSE, 0);
         }
 
-        gtk_widget_show_all(dialogo);
+        mostrar_con_fundido(dialogo);
         gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
 
         if (respuesta == RESPUESTA_REGISTRARME) {
@@ -4444,7 +4651,7 @@ static TipoEntrada mostrar_selector_entrada(void) {
     gtk_widget_set_halign(subtitulo, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(caja), subtitulo, FALSE, FALSE, 0);
 
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
     gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
     gtk_widget_destroy(dialogo);
 
@@ -4498,6 +4705,7 @@ static gboolean mostrar_login_gtk(char *usuario_out, size_t usuario_len, Rol *ro
         gtk_widget_set_halign(lbl_password, GTK_ALIGN_END);
         GtkWidget *entrada_password = gtk_entry_new();
         gtk_entry_set_visibility(GTK_ENTRY(entrada_password), FALSE);
+        agregar_boton_ver_password(entrada_password);
         gtk_entry_set_input_purpose(GTK_ENTRY(entrada_password), GTK_INPUT_PURPOSE_PASSWORD);
         gtk_grid_attach(GTK_GRID(grid), lbl_password, 0, 1, 1, 1);
         gtk_grid_attach(GTK_GRID(grid), entrada_password, 1, 1, 1, 1);
@@ -4517,7 +4725,7 @@ static gboolean mostrar_login_gtk(char *usuario_out, size_t usuario_len, Rol *ro
             gtk_box_pack_start(GTK_BOX(caja), lbl_error, FALSE, FALSE, 0);
         }
 
-        gtk_widget_show_all(dialogo);
+        mostrar_con_fundido(dialogo);
         gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
 
         if (respuesta != GTK_RESPONSE_ACCEPT) {
@@ -4603,6 +4811,7 @@ static void mostrar_asistente_bienvenida(void) {
         gtk_widget_set_halign(lbl_pass, GTK_ALIGN_END);
         GtkWidget *entrada_pass = gtk_entry_new();
         gtk_entry_set_visibility(GTK_ENTRY(entrada_pass), FALSE);
+        agregar_boton_ver_password(entrada_pass);
         gtk_entry_set_input_purpose(GTK_ENTRY(entrada_pass), GTK_INPUT_PURPOSE_PASSWORD);
         gtk_grid_attach(GTK_GRID(grid), lbl_pass, 0, 1, 1, 1);
         gtk_grid_attach(GTK_GRID(grid), entrada_pass, 1, 1, 1, 1);
@@ -4611,6 +4820,7 @@ static void mostrar_asistente_bienvenida(void) {
         gtk_widget_set_halign(lbl_pass2, GTK_ALIGN_END);
         GtkWidget *entrada_pass2 = gtk_entry_new();
         gtk_entry_set_visibility(GTK_ENTRY(entrada_pass2), FALSE);
+        agregar_boton_ver_password(entrada_pass2);
         gtk_entry_set_input_purpose(GTK_ENTRY(entrada_pass2), GTK_INPUT_PURPOSE_PASSWORD);
         gtk_grid_attach(GTK_GRID(grid), lbl_pass2, 0, 2, 1, 1);
         gtk_grid_attach(GTK_GRID(grid), entrada_pass2, 1, 2, 1, 1);
@@ -4620,7 +4830,7 @@ static void mostrar_asistente_bienvenida(void) {
         gtk_entry_set_activates_default(GTK_ENTRY(entrada_pass2), TRUE);
         gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_ACCEPT);
 
-        gtk_widget_show_all(dialogo);
+        mostrar_con_fundido(dialogo);
         gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
 
         if (respuesta != GTK_RESPONSE_ACCEPT) {
@@ -4665,6 +4875,17 @@ static void mostrar_asistente_bienvenida(void) {
 int main(int argc, char **argv) {
     gtk_init(&argc, &argv);
 
+    /* Icono de la app para todas las ventanas: usa la ruta instalada
+     * (la que copia el .deb / instalar-pawos.sh) si existe; si no, cae
+     * al archivo del repo (cuando se corre en desarrollo, sin
+     * instalar). Si ninguna existe no pasa nada -- se queda con el
+     * icono generico de GTK, igual que antes. */
+    if (g_file_test("/usr/share/icons/pawos-icon.png", G_FILE_TEST_EXISTS)) {
+        gtk_window_set_default_icon_from_file("/usr/share/icons/pawos-icon.png", NULL);
+    } else if (g_file_test("branding/pawos-icon.png", G_FILE_TEST_EXISTS)) {
+        gtk_window_set_default_icon_from_file("branding/pawos-icon.png", NULL);
+    }
+
     /* Modo claro/oscuro automatico: se aplica al iniciar segun la
      * preferencia del sistema, y se vuelve a aplicar solo si el usuario
      * cambia esa preferencia mientras PawOS esta abierto. Sin switch
@@ -4676,6 +4897,23 @@ int main(int argc, char **argv) {
                           G_CALLBACK(on_cambio_tema_sistema), NULL);
         g_signal_connect(settings_sistema, "notify::gtk-theme-name",
                           G_CALLBACK(on_cambio_tema_sistema), NULL);
+    }
+    /* Escucha en caliente el ajuste real de GNOME (ver comentario en
+     * modo_oscuro_activo): si el usuario cambia claro/oscuro en
+     * Configuracion del Sistema mientras PawOS esta abierto, esto
+     * reaplica los estilos al instante, sin cerrar y volver a abrir.
+     * Se deja vivo el resto de la ejecucion a proposito, para seguir
+     * escuchando. */
+    GSettingsSchemaSource *fuente_ajustes = g_settings_schema_source_get_default();
+    if (fuente_ajustes) {
+        GSettingsSchema *esquema_interfaz = g_settings_schema_source_lookup(
+            fuente_ajustes, "org.gnome.desktop.interface", TRUE);
+        if (esquema_interfaz) {
+            g_settings_schema_unref(esquema_interfaz);
+            GSettings *ajustes_interfaz = g_settings_new("org.gnome.desktop.interface");
+            g_signal_connect(ajustes_interfaz, "changed::color-scheme",
+                              G_CALLBACK(on_cambio_tema_sistema), NULL);
+        }
     }
 
     const char *ruta_bd = (argc > 1) ? argv[1] : RUTA_BD_DEFECTO;

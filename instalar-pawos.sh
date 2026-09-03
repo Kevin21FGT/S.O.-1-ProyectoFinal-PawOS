@@ -37,6 +37,10 @@ install -m 755 "$BINDIR/pawos-vacunas-check"  /usr/local/bin/pawos-vacunas-check
 install -m 755 "$BINDIR/pawos-monitoreo"      /usr/local/bin/pawos-monitoreo
 install -m 755 "$BINDIR/pawos-refugio-gui"    /usr/local/bin/pawos-refugio-gui
 
+echo "=== 3a. Instalando el icono de la app ==="
+mkdir -p /usr/share/icons
+[ -f "$BINDIR/branding/pawos-icon.png" ] && install -m 644 "$BINDIR/branding/pawos-icon.png" /usr/share/icons/pawos-icon.png
+
 echo "=== 3b. Copiando scripts de recordatorio de citas (correo/WhatsApp) ==="
 install -m 755 "$BINDIR/pawos-notificar-cita"               /usr/local/bin/pawos-notificar-cita
 install -m 755 "$BINDIR/pawos-configurar-notificaciones"    /usr/local/bin/pawos-configurar-notificaciones
@@ -431,7 +435,7 @@ Name=PawOS Refugio (GUI)
 Comment=Sistema de gestion para refugio de animales
 Exec=/usr/local/bin/pawos-refugio-gui
 Terminal=false
-Icon=utilities-terminal
+Icon=/usr/share/icons/pawos-icon.png
 Categories=Utility;
 EOF
 cat > /usr/share/applications/pawos-apagar.desktop << 'EOF'
