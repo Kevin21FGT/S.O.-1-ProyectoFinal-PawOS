@@ -1,0 +1,9 @@
+
+v1.14: aviso de actualizaciones y correcciones
+
+- Al abrir el programa, ahora se avisa automaticamente si hay una
+  version nueva disponible, con opcion de actualizar de una vez o
+  dejarlo para mas tarde.
+- Correccion de apariencia en algunos mensajes del sistema para que
+  respeten el modo oscuro correctamente.
+- Actualizacion de version.
