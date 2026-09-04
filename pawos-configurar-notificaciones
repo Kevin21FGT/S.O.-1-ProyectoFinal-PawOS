@@ -1,0 +1,39 @@
+#!/bin/bash
+# pawos-configurar-notificaciones - guarda las credenciales de correo
+# (Gmail) y WhatsApp (Green API) usadas para mandar recordatorios de
+# citas desde Agenda de Vacunas.
+#
+# Se corre como root (via sudo, restringido por sudoers al grupo
+# pawos-admin -- solo el Administrador puede cambiar estas
+# credenciales). Lee 5 lineas de stdin, en este orden exacto:
+#   GMAIL_USER
+#   GMAIL_APP_PASSWORD
+#   GREENAPI_API_URL
+#   GREENAPI_ID_INSTANCE
+#   GREENAPI_API_TOKEN
+#
+# El archivo queda en /etc/pawos/notificaciones.conf, dueno root:root,
+# permisos 600 (nadie mas puede leerlo directo) -- los scripts que
+# necesitan leerlo (pawos-enviar-correo-cita, pawos-enviar-whatsapp-cita)
+# tambien se corren via sudo (sudoers, grupo pawos-refugio).
+set -e
+
+mkdir -p /etc/pawos
+
+read -r GMAIL_USER
+read -r GMAIL_APP_PASSWORD
+read -r GREENAPI_API_URL
+read -r GREENAPI_ID_INSTANCE
+read -r GREENAPI_API_TOKEN
+
+cat > /etc/pawos/notificaciones.conf << EOF
+GMAIL_USER=$GMAIL_USER
+GMAIL_APP_PASSWORD=$GMAIL_APP_PASSWORD
+GREENAPI_API_URL=$GREENAPI_API_URL
+GREENAPI_ID_INSTANCE=$GREENAPI_ID_INSTANCE
+GREENAPI_API_TOKEN=$GREENAPI_API_TOKEN
+EOF
+
+chmod 600 /etc/pawos/notificaciones.conf
+chown root:root /etc/pawos/notificaciones.conf
+echo "OK"

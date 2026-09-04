@@ -34,14 +34,20 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
-#include "../include/db.h"
-#include "../include/auth.h"
-#include "../include/procesos.h"
-#include "../include/memoria.h"
+#include "db/db.h"
+#include "auth/auth.h"
+#include "procesos/procesos.h"
+#include "memoria/memoria.h"
 #include "../include/version.h"
 
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
 #define ID_PROCESO_DEMO 1u
+
+/* Prototipo adelantado: la implementacion completa (con el fundido de
+ * opacidad) esta mas abajo, junto a aplicar_estilos(); se declara aqui
+ * porque varios dialogos auxiliares de esta seccion (como
+ * pedir_entero_dialog) ya la usan mas arriba en el archivo. */
+static void mostrar_con_fundido(GtkWidget *ventana);
 
 /* ---------------------------------------------------------------
  * Utilidades comunes
@@ -87,7 +93,7 @@ static gboolean pedir_entero_dialog(GtkWindow *padre, const char *titulo, const 
     gtk_container_add(GTK_CONTAINER(area), caja);
 
     gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_OK);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     gboolean ok = FALSE;
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
@@ -151,7 +157,7 @@ static gboolean seleccionar_mascota_dialog(GtkWindow *padre, int *id_out) {
     gtk_container_add(GTK_CONTAINER(scroll), treeview);
     gtk_box_pack_start(GTK_BOX(area), scroll, TRUE, TRUE, 0);
 
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     gboolean ok = FALSE;
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
@@ -215,7 +221,7 @@ static gboolean pedir_mascota_id_dialog(GtkWindow *padre, const char *titulo, co
     gtk_container_add(GTK_CONTAINER(area), caja);
 
     gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_OK);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     gboolean ok = FALSE;
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
@@ -245,6 +251,30 @@ static GtkCssProvider *g_proveedor_estilos = NULL;
  * (GNOME, XFCE, etc. la sincronizan via GtkSettings). Como respaldo,
  * tambien revisa si el nombre del tema activo contiene "dark". */
 static gboolean modo_oscuro_activo(void) {
+    /* Fuente principal: la preferencia real de GNOME moderno
+     * (Configuracion > Apariencia > Oscuro). Se guarda en
+     * org.gnome.desktop.interface/color-scheme -- NO en
+     * gtk-application-prefer-dark-theme ni en gtk-theme-name (las que
+     * se revisaban antes; por eso nunca se detectaba el cambio, ni
+     * siquiera reabriendo la app). */
+    GSettingsSchemaSource *fuente = g_settings_schema_source_get_default();
+    if (fuente) {
+        GSettingsSchema *esquema = g_settings_schema_source_lookup(
+            fuente, "org.gnome.desktop.interface", TRUE);
+        if (esquema) {
+            g_settings_schema_unref(esquema);
+            GSettings *ajustes = g_settings_new("org.gnome.desktop.interface");
+            gchar *esquema_color = g_settings_get_string(ajustes, "color-scheme");
+            gboolean prefiere_oscuro_gnome =
+                (esquema_color != NULL && strcmp(esquema_color, "prefer-dark") == 0);
+            g_free(esquema_color);
+            g_object_unref(ajustes);
+            if (prefiere_oscuro_gnome) return TRUE;
+        }
+    }
+
+    /* Respaldo para escritorios sin ese ajuste de GNOME (XFCE, etc.):
+     * la preferencia clasica de GTK. */
     GtkSettings *settings = gtk_settings_get_default();
     if (!settings) return FALSE;
 
@@ -265,20 +295,38 @@ static gboolean modo_oscuro_activo(void) {
 static void aplicar_estilos(void) {
     gboolean oscuro = modo_oscuro_activo();
 
-    const char *fondo_ventana    = oscuro ? "#1B211C" : "#EDF2EA";
+    const char *fondo_ventana    = oscuro ? "#1B211C" : "#F2F3F5";
     const char *color_texto      = oscuro ? "#E7ECE4" : "#1C2620";
-    const char *fondo_dialogo    = oscuro ? "#232B24" : "#F7FAF6";
+    const char *fondo_dialogo    = oscuro ? "#232B24" : "#FFFFFF";
     const char *fondo_tabla      = oscuro ? "#20271F" : "#FFFFFF";
     const char *texto_tabla      = oscuro ? "#E7ECE4" : "#1C2620";
     const char *seleccion_bg     = oscuro ? "#2E6B3F" : "#BFE6C9";
     const char *seleccion_fg     = oscuro ? "#F2F8F0" : "#103018";
     const char *deshabilitado_bg = oscuro ? "#3A423B" : "#CBD3C7";
     const char *deshabilitado_fg = oscuro ? "#8B948B" : "#7C877A";
+    const char *boton_bg         = oscuro ? "#2A322B" : "#FFFFFF";
+    const char *boton_bg_hover   = oscuro ? "#354039" : "#F2F3F5";
+    const char *boton_fg         = oscuro ? "#E7ECE4" : "#1C2620";
+    const char *boton_borde      = oscuro ? "#3A443B" : "#D7DEDA";
 
     gchar *css = g_strdup_printf(
         /* Fondo general de la app */
         "window { background-color: %s; }"
         "label { color: %s; }"
+
+        /* Barra de titulo automatica de GTK (no hay una propia
+         * definida): sin esto se queda blanca aunque todo lo demas
+         * cambie de modo. */
+        "headerbar, .titlebar, decoration {"
+        "  background-color: %s;"
+        "  background-image: none;"
+        "  color: %s;"
+        "}"
+        "headerbar button, .titlebar button, decoration button {"
+        "  background-color: %s;"
+        "  background-image: none;"
+        "  color: %s;"
+        "}"
 
         /* Banner de encabezado (ventana principal): degradado verde bosque,
          * igual en ambos modos porque es un color de marca, no de fondo. */
@@ -299,13 +347,22 @@ static void aplicar_estilos(void) {
         ".badge-admin       { background-color: #E8B23D; color: #3B2A05; }"
         ".badge-veterinario { background-color: #2C8C99; color: #FFFFFF; }"
         ".badge-voluntario  { background-color: #6C7A76; color: #FFFFFF; }"
+        ".badge-rescatista    { background-color: #C1440E; color: #FFFFFF; }"
+        ".badge-recepcionista { background-color: #7A4FA3; color: #FFFFFF; }"
 
-        /* Botones generales */
+        /* Botones generales (los que no tienen .modulo/.salir/.cat-* --
+         * necesitan su propio fondo/texto segun el modo, si no el texto
+         * queda invisible sobre un fondo que nunca cambia). */
         "button {"
         "  padding: 10px;"
         "  border-radius: 10px;"
         "  transition: 150ms ease-in-out;"
+        "  background-color: %s;"
+        "  background-image: none;"
+        "  color: %s;"
+        "  border: 1px solid %s;"
         "}"
+        "button:hover { background-color: %s; }"
         "button.modulo {"
         "  color: #FFFFFF;"
         "  font-weight: bold;"
@@ -340,15 +397,56 @@ static void aplicar_estilos(void) {
         "}"
         "treeview:selected, treeview.view:selected { background-color: %s; color: %s; }"
 
+        /* Menu desplegable de los combo box (ej. el filtro
+         * Texto/PDF del dialogo de guardar, o cualquier otro combo de
+         * la app): tiene su propio nodo CSS, no hereda nada de
+         * "dialog" ni "window". */
+        "menu, .menu {"
+        "  background-color: %s;"
+        "  color: %s;"
+        "}"
+        "menuitem {"
+        "  color: %s;"
+        "}"
+
         /* Dialogos y campos de texto */
-        "dialog { background-color: %s; }"
-        "entry, textview, textview text { background-color: %s; color: %s; }",
+        "dialog, dialog box, pathbar, .path-bar, placesview,"
+        "dialog scrolledwindow, dialog viewport, dialog list, dialog stack,"
+        "messagedialog, messagedialog box, .message-area, .message-area box {"
+        "  background-color: %s;"
+        "}"
+        "entry, textview, textview text {"
+        "  background-color: %s; color: %s;"
+        "  border: 1px solid %s;"
+        "  border-radius: 6px;"
+        "  transition: 150ms ease-in-out;"
+        "}"
+        "entry:focus, textview:focus {"
+        "  border-color: #23924B;"
+        "}"
+
+        /* Panel lateral de "favoritos" (Carpeta personal, Descargas,
+         * etc.) de los dialogos nativos de Abrir/Guardar: usa su
+         * propio nodo CSS (placessidebar / .sidebar) que no hereda el
+         * fondo de "dialog", por eso se quedaba blanco aunque el
+         * resto del dialogo si cambiara de modo. */
+        "placessidebar, .sidebar {"
+        "  background-color: %s;"
+        "}"
+        "placessidebar row, .sidebar row {"
+        "  color: %s;"
+        "}",
         fondo_ventana, color_texto,
+        fondo_ventana, color_texto,
+        boton_bg, boton_fg,
+        boton_bg, boton_fg, boton_borde, boton_bg_hover,
         deshabilitado_bg, deshabilitado_fg,
         fondo_tabla, texto_tabla,
         seleccion_bg, seleccion_fg,
         fondo_dialogo,
-        fondo_dialogo, color_texto);
+        fondo_dialogo, color_texto, boton_borde,
+        fondo_dialogo, color_texto,
+        fondo_dialogo, color_texto, color_texto);
 
     if (g_proveedor_estilos) {
         gtk_style_context_remove_provider_for_screen(
@@ -374,6 +472,55 @@ static void on_cambio_tema_sistema(GObject *obj, GParamSpec *pspec, gpointer dat
     (void)pspec;
     (void)datos;
     aplicar_estilos();
+}
+
+/* Icono de "ojo" para mostrar/ocultar el texto de un campo de
+ * contrasena, reutilizable en todos los formularios de la app (login,
+ * registro, configuracion de notificaciones, etc.). Al hacer clic en
+ * el icono alterna gtk_entry_set_visibility() y cambia el icono para
+ * reflejar el estado actual. */
+static void on_click_icono_ver_password(GtkEntry *entrada, GtkEntryIconPosition posicion,
+                                          GdkEvent *evento, gpointer datos) {
+    (void)evento;
+    (void)datos;
+    if (posicion != GTK_ENTRY_ICON_SECONDARY) return;
+    gboolean visible = gtk_entry_get_visibility(entrada);
+    gtk_entry_set_visibility(entrada, !visible);
+    gtk_entry_set_icon_from_icon_name(entrada, GTK_ENTRY_ICON_SECONDARY,
+        !visible ? "view-conceal-symbolic" : "view-reveal-symbolic");
+}
+
+static void agregar_boton_ver_password(GtkWidget *entrada) {
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(entrada), GTK_ENTRY_ICON_SECONDARY,
+                                       "view-reveal-symbolic");
+    gtk_entry_set_icon_tooltip_text(GTK_ENTRY(entrada), GTK_ENTRY_ICON_SECONDARY,
+                                     "Mostrar/ocultar contrasena");
+    g_signal_connect(entrada, "icon-press", G_CALLBACK(on_click_icono_ver_password), NULL);
+}
+
+/* Fundido de entrada (fade-in) para ventanas y dialogos: en vez de
+ * aparecer de golpe, la opacidad sube de 0 a 1 en unos pocos pasos
+ * (~100ms). El temporizador se apaga solo (G_SOURCE_REMOVE) al llegar
+ * a opacidad completa -- no queda nada corriendo de fondo. Se guarda
+ * una referencia (g_object_ref) mientras dura la animacion para que no
+ * truene si el usuario alcanza a cerrar la ventana antes de que
+ * termine. */
+static gboolean fundido_tick(gpointer datos) {
+    GtkWidget *widget = GTK_WIDGET(datos);
+    gdouble opacidad = gtk_widget_get_opacity(widget) + 0.15;
+    if (opacidad >= 1.0) {
+        gtk_widget_set_opacity(widget, 1.0);
+        g_object_unref(widget);
+        return G_SOURCE_REMOVE;
+    }
+    gtk_widget_set_opacity(widget, opacidad);
+    return G_SOURCE_CONTINUE;
+}
+
+static void mostrar_con_fundido(GtkWidget *ventana) {
+    gtk_widget_set_opacity(ventana, 0.0);
+    gtk_widget_show_all(ventana);
+    g_timeout_add(15, fundido_tick, g_object_ref(ventana));
 }
 
 /* =================================================================
@@ -465,7 +612,7 @@ static void on_registrar_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_edad, 1, 3, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Mascota m;
@@ -513,7 +660,7 @@ static void on_cambiar_estado_clicked(GtkButton *boton, gpointer datos) {
     gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
     gtk_container_set_border_width(GTK_CONTAINER(combo), 12);
     gtk_container_add(GTK_CONTAINER(area), combo);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         gchar *nuevo = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo));
@@ -632,7 +779,7 @@ static void abrir_pantalla_mascotas(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_mascotas(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -729,6 +876,18 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_prox), "AAAA-MM-DD (opcional)");
     gtk_entry_set_placeholder_text(GTK_ENTRY(e_obs), "Opcional");
 
+    GtkWidget *e_cliente = gtk_combo_box_text_new();
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_cliente), "0", "(Ninguno)");
+    Cliente *lista_clientes_vac = NULL;
+    int n_clientes_vac = 0;
+    cliente_listar(&lista_clientes_vac, &n_clientes_vac);
+    for (int i = 0; i < n_clientes_vac; i++) {
+        char id_cliente_txt[16];
+        snprintf(id_cliente_txt, sizeof(id_cliente_txt), "%d", lista_clientes_vac[i].id);
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(e_cliente), id_cliente_txt, lista_clientes_vac[i].nombre);
+    }
+    gtk_combo_box_set_active(GTK_COMBO_BOX(e_cliente), 0);
+
     gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nombre de la vacuna:"), 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), e_nombre, 1, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Fecha de aplicacion:"), 0, 1, 1, 1);
@@ -737,9 +896,11 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_prox, 1, 2, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Observaciones:"), 0, 3, 1, 1);
     gtk_grid_attach(GTK_GRID(cuadricula), e_obs, 1, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Cliente a notificar (opcional):"), 0, 4, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_cliente, 1, 4, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Vacuna v;
@@ -749,14 +910,55 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
         snprintf(v.fecha_aplicacion, sizeof(v.fecha_aplicacion), "%s", gtk_entry_get_text(GTK_ENTRY(e_aplic)));
         snprintf(v.fecha_proxima, sizeof(v.fecha_proxima), "%s", gtk_entry_get_text(GTK_ENTRY(e_prox)));
         snprintf(v.observaciones, sizeof(v.observaciones), "%s", gtk_entry_get_text(GTK_ENTRY(e_obs)));
+        const gchar *cliente_id_texto = gtk_combo_box_get_active_id(GTK_COMBO_BOX(e_cliente));
+        v.cliente_id = cliente_id_texto ? atoi(cliente_id_texto) : 0;
 
         if (vacuna_agregar(&v) == 0) {
             cargar_vacunas(ctx);
             mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Vacuna registrada.", FALSE);
+
+            /* Si se eligio un Cliente para notificar, se ofrece mandar
+             * el recordatorio (PDF por correo y WhatsApp) ya mismo. Si
+             * no se eligio ninguno (v.cliente_id == 0), nada de esto
+             * corre -- se comporta exactamente igual que antes. */
+            if (v.cliente_id > 0) {
+                Cliente *cliente_elegido = NULL;
+                for (int i = 0; i < n_clientes_vac; i++) {
+                    if (lista_clientes_vac[i].id == v.cliente_id) {
+                        cliente_elegido = &lista_clientes_vac[i];
+                        break;
+                    }
+                }
+                if (cliente_elegido) {
+                    gchar *pregunta = g_strdup_printf(
+                        "Enviar recordatorio de esta cita a %s por correo y WhatsApp?",
+                        cliente_elegido->nombre);
+                    GtkWidget *confirmar = gtk_message_dialog_new(
+                        GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION,
+                        GTK_BUTTONS_YES_NO, "%s", pregunta);
+                    g_free(pregunta);
+                    gint respuesta = gtk_dialog_run(GTK_DIALOG(confirmar));
+                    gtk_widget_destroy(confirmar);
+                    if (respuesta == GTK_RESPONSE_YES) {
+                        gchar *argv_envio[] = {
+                            "x-terminal-emulator", "-e", "pawos-notificar-cita",
+                            cliente_elegido->correo, cliente_elegido->telefono,
+                            cliente_elegido->nombre, m.nombre, v.nombre_vacuna, v.fecha_proxima,
+                            NULL
+                        };
+                        GError *error_envio = NULL;
+                        if (!g_spawn_async(NULL, argv_envio, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error_envio)) {
+                            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo abrir el envio de recordatorio.", TRUE);
+                            if (error_envio) g_error_free(error_envio);
+                        }
+                    }
+                }
+            }
         } else {
             mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Error al registrar la vacuna.", TRUE);
         }
     }
+    free(lista_clientes_vac);
     gtk_widget_destroy(dialogo);
 }
 
@@ -825,7 +1027,7 @@ static void abrir_pantalla_vacunas(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_vacunas(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -913,7 +1115,7 @@ static void on_registrar_adopcion_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_contacto, 1, 1, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Adopcion a;
@@ -987,7 +1189,7 @@ static void abrir_pantalla_adopciones(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_adopciones(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -1073,7 +1275,7 @@ static void on_registrar_donante_clicked(GtkButton *boton, gpointer datos) {
     gtk_grid_attach(GTK_GRID(cuadricula), e_monto, 1, 2, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Donante d;
@@ -1152,7 +1354,7 @@ static void abrir_pantalla_donantes(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_donantes(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -1619,7 +1821,7 @@ static void abrir_pantalla_reportes(GtkWidget *padre, Rol rol) {
     g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -1704,7 +1906,7 @@ static void on_terminar_proceso_clicked(GtkButton *boton, gpointer datos) {
     gtk_box_pack_start(GTK_BOX(caja), e_pid, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(caja), chk_forzar, FALSE, FALSE, 0);
     gtk_container_add(GTK_CONTAINER(area), caja);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         int pid = atoi(gtk_entry_get_text(GTK_ENTRY(e_pid)));
@@ -1786,7 +1988,7 @@ static void abrir_pantalla_procesos(GtkWidget *padre) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_procesos(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -1992,7 +2194,7 @@ static void abrir_pantalla_memoria(GtkWidget *padre) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     actualizar_estadisticas_memoria(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -2490,7 +2692,7 @@ static void on_respaldar_ahora_clicked(GtkButton *boton, gpointer datos) {
     gtk_container_add(GTK_CONTAINER(area), caja);
 
     gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_OK);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     int respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
     char etiqueta_buf[64] = "";
@@ -2709,7 +2911,7 @@ static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
     actualizar_estado_respaldo(ctx);
     actualizar_ui_modo_respaldo(ctx);
     cargar_historial_respaldos(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -2863,7 +3065,7 @@ static void on_registrar_alerta_prueba_clicked(GtkButton *boton, gpointer datos)
     gtk_grid_attach(GTK_GRID(cuadricula), e_valor, 1, 3, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
-    gtk_widget_show_all(dialogo);
+    mostrar_con_fundido(dialogo);
 
     if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
         Alerta a;
@@ -2964,7 +3166,7 @@ static void abrir_pantalla_alertas(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
 
     cargar_alertas(ctx);
-    gtk_widget_show_all(ctx->ventana);
+    mostrar_con_fundido(ctx->ventana);
 }
 
 /* =================================================================
@@ -3063,16 +3265,764 @@ static void on_alertas_clicked(GtkButton *boton, gpointer datos) {
     abrir_pantalla_alertas(d->ventana_principal, d->rol);
 }
 
+/* Clasifica cada linea del changelog con un icono, al estilo de las
+ * notas de version de Google Play / Windows Update (novedad, mejora,
+ * correccion de estabilidad). Heuristica simple por palabras clave,
+ * solo cosmetica -- no cambia el contenido del mensaje. */
+static const char *clasificar_commit_icono(const char *mensaje) {
+    gchar *minuscula = g_utf8_strdown(mensaje, -1);
+    const char *icono;
+    if (strstr(minuscula, "arregla") || strstr(minuscula, "corrige") ||
+        strstr(minuscula, "arreglo") || strstr(minuscula, "error") ||
+        strstr(minuscula, "bug") || strstr(minuscula, "fix")) {
+        icono = "\xF0\x9F\x94\xA7"; /* llave inglesa = estabilidad */
+    } else if (strstr(minuscula, "mejora") || strstr(minuscula, "optimiza") ||
+               strstr(minuscula, "profesional") || strstr(minuscula, "diseno") ||
+               strstr(minuscula, "dise\xC3\xB1o")) {
+        icono = "\xE2\xAD\x90"; /* estrella = mejora */
+    } else {
+        icono = "\xE2\x9C\xA8"; /* destellos = novedad */
+    }
+    g_free(minuscula);
+    return icono;
+}
+
 static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
-    (void)datos;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    GtkWindow *padre = (d && d->ventana_principal) ? GTK_WINDOW(d->ventana_principal) : NULL;
+
+    GtkWidget *dialogo_buscando = gtk_message_dialog_new(
+        padre, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_NONE,
+        "Buscando actualizaciones...");
+    GtkWidget *spinner_buscando = gtk_spinner_new();
+    gtk_spinner_start(GTK_SPINNER(spinner_buscando));
+    gtk_box_pack_start(
+        GTK_BOX(gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialogo_buscando))),
+        spinner_buscando, FALSE, FALSE, 6);
+    gtk_widget_show_all(dialogo_buscando);
+    while (gtk_events_pending()) gtk_main_iteration();
+
+    gchar *salida = NULL;
+    gchar *error_salida = NULL;
+    gint estado_salida = 0;
     GError *error = NULL;
-    gboolean ok = g_spawn_command_line_async(
-        "x-terminal-emulator -e /usr/local/bin/pawos-actualizar-gui", &error);
+    const gchar *comando =
+        "bash -c '"
+        "REPO_DIR=/opt/pawos-src; RAMA=rama-Kevin; "
+        "git config --global --add safe.directory \"$REPO_DIR\" 2>/dev/null; "
+        "if [ -d \"$REPO_DIR/.git\" ]; then "
+        "  cd \"$REPO_DIR\" || { echo SIN_CONEXION; exit 0; }; "
+        "  git fetch origin \"$RAMA\" >/dev/null 2>&1 || { echo SIN_CONEXION; exit 0; }; "
+        "  LOCAL=$(git rev-parse HEAD); REMOTE=$(git rev-parse origin/$RAMA); "
+        "  if [ \"$LOCAL\" = \"$REMOTE\" ]; then echo AL_DIA; "
+        "  else echo HAY_CAMBIOS; git log \"$LOCAL..$REMOTE\" --no-merges --pretty=format:%s; fi; "
+        "else echo PRIMERA_VEZ; fi'";
+
+    gboolean ok = g_spawn_command_line_sync(comando, &salida, &error_salida, &estado_salida, &error);
+    gtk_widget_destroy(dialogo_buscando);
+    g_free(error_salida);
+
     if (!ok) {
-        g_warning("No se pudo abrir el actualizador: %s", error ? error->message : "error desconocido");
+        mostrar_mensaje(padre, "No se pudo buscar actualizaciones. Revisa tu conexion a internet.", TRUE);
         if (error) g_error_free(error);
+        g_free(salida);
+        return;
     }
+
+    gchar **lineas = g_strsplit(salida ? salida : "", "\n", -1);
+    g_free(salida);
+    const char *estado = lineas[0] ? lineas[0] : "";
+
+    if (g_strcmp0(estado, "SIN_CONEXION") == 0) {
+        mostrar_mensaje(padre, "No se pudo conectar para buscar actualizaciones.\nRevisa tu conexion a internet.", TRUE);
+        g_strfreev(lineas);
+        return;
+    }
+    if (g_strcmp0(estado, "AL_DIA") == 0) {
+        mostrar_mensaje(padre, "Ya tienes la ultima version instalada.", FALSE);
+        g_strfreev(lineas);
+        return;
+    }
+
+    /* HAY_CAMBIOS o PRIMERA_VEZ: mostramos el dialogo de novedades,
+     * al estilo de una tienda de aplicaciones. */
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "PawOS - Actualizaciones", padre, GTK_DIALOG_MODAL,
+        "Cancelar", GTK_RESPONSE_CANCEL,
+        "Actualizar ahora", GTK_RESPONSE_ACCEPT,
+        NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dialogo), 460, 420);
+
+    GtkWidget *area_contenido = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    gtk_container_set_border_width(GTK_CONTAINER(area_contenido), 16);
+
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(area_contenido), caja);
+
+    GtkWidget *titulo = gtk_label_new(NULL);
+    if (g_strcmp0(estado, "PRIMERA_VEZ") == 0) {
+        gtk_label_set_markup(GTK_LABEL(titulo),
+            "<span size='large' weight='bold'>\xF0\x9F\x93\xA5 Version disponible para instalar</span>");
+    } else {
+        gtk_label_set_markup(GTK_LABEL(titulo),
+            "<span size='large' weight='bold'>\xF0\x9F\x94\x84 Nueva version disponible</span>");
+    }
+    gtk_widget_set_halign(titulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+    GtkWidget *subtitulo = gtk_label_new(
+        g_strcmp0(estado, "PRIMERA_VEZ") == 0
+            ? "Se instalara PawOS Refugio por primera vez en este equipo."
+            : "Novedades, mejoras y correcciones de esta actualizacion:");
+    gtk_widget_set_halign(subtitulo, GTK_ALIGN_START);
+    gtk_label_set_line_wrap(GTK_LABEL(subtitulo), TRUE);
+    gtk_box_pack_start(GTK_BOX(caja), subtitulo, FALSE, FALSE, 0);
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
+
+    GtkWidget *lista_novedades = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_container_add(GTK_CONTAINER(scroll), lista_novedades);
+
+    int total_items = 0;
+    for (int i = 1; lineas[i] != NULL && total_items < 40; i++) {
+        if (lineas[i][0] == '\0') continue;
+        const char *icono = clasificar_commit_icono(lineas[i]);
+        gchar *texto_item = g_strdup_printf("%s  %s", icono, lineas[i]);
+        GtkWidget *lbl_item = gtk_label_new(texto_item);
+        g_free(texto_item);
+        gtk_label_set_line_wrap(GTK_LABEL(lbl_item), TRUE);
+        gtk_widget_set_halign(lbl_item, GTK_ALIGN_START);
+        gtk_box_pack_start(GTK_BOX(lista_novedades), lbl_item, FALSE, FALSE, 0);
+        total_items++;
+    }
+    if (total_items == 0) {
+        GtkWidget *lbl_vacio = gtk_label_new("(Sin detalle de cambios disponible)");
+        gtk_box_pack_start(GTK_BOX(lista_novedades), lbl_vacio, FALSE, FALSE, 0);
+    }
+    g_strfreev(lineas);
+
+    mostrar_con_fundido(dialogo);
+    gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+    gtk_widget_destroy(dialogo);
+
+    if (respuesta == GTK_RESPONSE_ACCEPT) {
+        GError *error_terminal = NULL;
+        gboolean ok_terminal = g_spawn_command_line_async(
+            "x-terminal-emulator -e /usr/local/bin/pawos-actualizar-gui", &error_terminal);
+        if (!ok_terminal) {
+            g_warning("No se pudo abrir el actualizador: %s", error_terminal ? error_terminal->message : "error desconocido");
+            if (error_terminal) g_error_free(error_terminal);
+        }
+    }
+}
+
+/* Dialogo "Acerca de": version (de include/version.h), descripcion
+ * breve y creditos. Solo informativo, no lee ni escribe nada. */
+static void on_acerca_de_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    GtkWindow *padre = (d && d->ventana_principal) ? GTK_WINDOW(d->ventana_principal) : NULL;
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Acerca de PawOS Refugio", padre, GTK_DIALOG_MODAL,
+        "_Cerrar", GTK_RESPONSE_CLOSE, NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dialogo), 380, -1);
+
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 18);
+    gtk_container_add(GTK_CONTAINER(area), caja);
+
+    GtkWidget *titulo = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(titulo),
+        "<span size='x-large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
+    gtk_widget_set_halign(titulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+    gchar *texto_version = g_strdup_printf("Version %s", PAWOS_VERSION);
+    GtkWidget *lbl_version = gtk_label_new(texto_version);
+    g_free(texto_version);
+    gtk_widget_set_halign(lbl_version, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl_version, FALSE, FALSE, 0);
+
+    GtkWidget *lbl_desc = gtk_label_new(
+        "Sistema de gestion para refugios de animales: mascotas, "
+        "vacunas, adopciones, donantes y recordatorios automaticos "
+        "de citas por correo y WhatsApp.");
+    gtk_label_set_line_wrap(GTK_LABEL(lbl_desc), TRUE);
+    gtk_widget_set_halign(lbl_desc, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl_desc, FALSE, FALSE, 8);
+
+    GtkWidget *lbl_creditos = gtk_label_new("Proyecto Final de Sistemas Operativos.");
+    gtk_widget_set_halign(lbl_creditos, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl_creditos, FALSE, FALSE, 0);
+
+    mostrar_con_fundido(dialogo);
+    gtk_dialog_run(GTK_DIALOG(dialogo));
+    gtk_widget_destroy(dialogo);
+}
+
+/* Revisa en silencio (sin dialogo de "Buscando...") si hay una
+ * version nueva en GitHub, para el aviso automatico al arrancar el
+ * programa. Si no hay nada que avisar (ya esta al dia, sin conexion,
+ * o fallo el chequeo) no hace nada -- el arranque sigue normal, sin
+ * interrumpir al usuario con un mensaje que no aporta nada. */
+static void revisar_actualizaciones_al_iniciar(void) {
+    gchar *salida = NULL;
+    gchar *error_salida = NULL;
+    gint estado_salida = 0;
+    GError *error = NULL;
+    const gchar *comando =
+        "bash -c '"
+        "REPO_DIR=/opt/pawos-src; RAMA=rama-Kevin; "
+        "git config --global --add safe.directory \"$REPO_DIR\" 2>/dev/null; "
+        "if [ -d \"$REPO_DIR/.git\" ]; then "
+        "  cd \"$REPO_DIR\" || { echo SIN_CONEXION; exit 0; }; "
+        "  git fetch origin \"$RAMA\" >/dev/null 2>&1 || { echo SIN_CONEXION; exit 0; }; "
+        "  LOCAL=$(git rev-parse HEAD); REMOTE=$(git rev-parse origin/$RAMA); "
+        "  if [ \"$LOCAL\" = \"$REMOTE\" ]; then echo AL_DIA; "
+        "  else echo HAY_CAMBIOS; git log \"$LOCAL..$REMOTE\" --no-merges --pretty=format:%s; fi; "
+        "else echo PRIMERA_VEZ; fi'";
+
+    gboolean ok = g_spawn_command_line_sync(comando, &salida, &error_salida, &estado_salida, &error);
+    g_free(error_salida);
+    if (error) g_error_free(error);
+    if (!ok) {
+        g_free(salida);
+        return;
+    }
+
+    gchar **lineas = g_strsplit(salida ? salida : "", "\n", -1);
+    g_free(salida);
+    const char *estado = lineas[0] ? lineas[0] : "";
+
+    if (g_strcmp0(estado, "HAY_CAMBIOS") != 0 && g_strcmp0(estado, "PRIMERA_VEZ") != 0) {
+        /* Al dia, sin conexion, o algo fallo: no interrumpe el
+         * arranque con ningun aviso. */
+        g_strfreev(lineas);
+        return;
+    }
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "PawOS - Actualizacion disponible", NULL, GTK_DIALOG_MODAL,
+        "Mas tarde", GTK_RESPONSE_CANCEL,
+        "Actualizar ahora", GTK_RESPONSE_ACCEPT,
+        NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dialogo), 460, 420);
+
+    GtkWidget *area_contenido = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    gtk_container_set_border_width(GTK_CONTAINER(area_contenido), 16);
+
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(area_contenido), caja);
+
+    GtkWidget *titulo = gtk_label_new(NULL);
+    if (g_strcmp0(estado, "PRIMERA_VEZ") == 0) {
+        gtk_label_set_markup(GTK_LABEL(titulo),
+            "<span size='large' weight='bold'>\xF0\x9F\x93\xA5 Version disponible para instalar</span>");
+    } else {
+        gtk_label_set_markup(GTK_LABEL(titulo),
+            "<span size='large' weight='bold'>\xF0\x9F\x94\x84 Nueva version disponible</span>");
+    }
+    gtk_widget_set_halign(titulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+    GtkWidget *subtitulo = gtk_label_new(
+        g_strcmp0(estado, "PRIMERA_VEZ") == 0
+            ? "Se instalara PawOS Refugio por primera vez en este equipo."
+            : "Novedades, mejoras y correcciones de esta actualizacion:");
+    gtk_widget_set_halign(subtitulo, GTK_ALIGN_START);
+    gtk_label_set_line_wrap(GTK_LABEL(subtitulo), TRUE);
+    gtk_box_pack_start(GTK_BOX(caja), subtitulo, FALSE, FALSE, 0);
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
+
+    GtkWidget *lista_novedades = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_container_add(GTK_CONTAINER(scroll), lista_novedades);
+
+    int total_items = 0;
+    for (int i = 1; lineas[i] != NULL && total_items < 40; i++) {
+        if (lineas[i][0] == '\0') continue;
+        const char *icono = clasificar_commit_icono(lineas[i]);
+        gchar *texto_item = g_strdup_printf("%s  %s", icono, lineas[i]);
+        GtkWidget *lbl_item = gtk_label_new(texto_item);
+        g_free(texto_item);
+        gtk_label_set_line_wrap(GTK_LABEL(lbl_item), TRUE);
+        gtk_widget_set_halign(lbl_item, GTK_ALIGN_START);
+        gtk_box_pack_start(GTK_BOX(lista_novedades), lbl_item, FALSE, FALSE, 0);
+        total_items++;
+    }
+    if (total_items == 0) {
+        GtkWidget *lbl_vacio = gtk_label_new("(Sin detalle de cambios disponible)");
+        gtk_box_pack_start(GTK_BOX(lista_novedades), lbl_vacio, FALSE, FALSE, 0);
+    }
+    g_strfreev(lineas);
+
+    mostrar_con_fundido(dialogo);
+    gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+    gtk_widget_destroy(dialogo);
+
+    if (respuesta == GTK_RESPONSE_ACCEPT) {
+        GError *error_terminal = NULL;
+        gboolean ok_terminal = g_spawn_command_line_async(
+            "x-terminal-emulator -e /usr/local/bin/pawos-actualizar-gui", &error_terminal);
+        if (!ok_terminal) {
+            g_warning("No se pudo abrir el actualizador: %s", error_terminal ? error_terminal->message : "error desconocido");
+            if (error_terminal) g_error_free(error_terminal);
+        }
+    }
+}
+
+/* ---------------- Administrar Colaboradores (solo Admin) ---------------- */
+
+static const char *nombre_rol_colaborador(int rol) {
+    switch (rol) {
+        case ROL_ADMIN: return "Administrador";
+        case ROL_VETERINARIO: return "Veterinario";
+        case ROL_RESCATISTA: return "Rescatista";
+        case ROL_RECEPCIONISTA: return "Recepcionista";
+        default: return "Voluntario";
+    }
+}
+
+typedef struct {
+    GtkWidget    *ventana;
+    GtkWidget    *treeview;
+    GtkListStore *store;
+} ContextoColaboradores;
+
+static void cargar_colaboradores(ContextoColaboradores *ctx) {
+    gtk_list_store_clear(ctx->store);
+    UsuarioInfo *usuarios;
+    int n;
+    if (usuario_listar(&usuarios, &n) != 0) return;
+    for (int i = 0; i < n; i++) {
+        GtkTreeIter iter;
+        gtk_list_store_append(ctx->store, &iter);
+        gtk_list_store_set(ctx->store, &iter,
+            0, usuarios[i].username,
+            1, nombre_rol_colaborador(usuarios[i].rol),
+            -1);
+    }
+    free(usuarios);
+}
+
+/* referencias[0] = GtkImage de vista previa, referencias[1] = ventana
+ * padre (para centrar el selector de archivos encima). El base64 de
+ * la foto elegida queda guardado como dato asociado a la imagen de
+ * vista previa (g_object_set_data_full), para leerlo despues al
+ * guardar el formulario completo. */
+static void on_elegir_foto_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    GtkWidget **referencias = (GtkWidget **)datos;
+    GtkWidget *dialogo = gtk_file_chooser_dialog_new(
+        "Elegir foto", GTK_WINDOW(referencias[1]), GTK_FILE_CHOOSER_ACTION_OPEN,
+        "Cancelar", GTK_RESPONSE_CANCEL,
+        "Elegir", GTK_RESPONSE_ACCEPT,
+        NULL);
+
+    GtkFileFilter *filtro = gtk_file_filter_new();
+    gtk_file_filter_set_name(filtro, "Imagenes");
+    gtk_file_filter_add_mime_type(filtro, "image/png");
+    gtk_file_filter_add_mime_type(filtro, "image/jpeg");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialogo), filtro);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_ACCEPT) {
+        char *ruta = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialogo));
+        gchar *contenido = NULL;
+        gsize largo = 0;
+        if (ruta && g_file_get_contents(ruta, &contenido, &largo, NULL)) {
+            gchar *b64 = g_base64_encode((const guchar *)contenido, largo);
+            g_object_set_data_full(G_OBJECT(referencias[0]), "foto_base64", b64, g_free);
+
+            GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+            if (gdk_pixbuf_loader_write(loader, (const guchar *)contenido, largo, NULL)) {
+                gdk_pixbuf_loader_close(loader, NULL);
+                GdkPixbuf *pixbuf = gdk_pixbuf_loader_get_pixbuf(loader);
+                if (pixbuf) {
+                    GdkPixbuf *escalado = gdk_pixbuf_scale_simple(pixbuf, 64, 64, GDK_INTERP_BILINEAR);
+                    gtk_image_set_from_pixbuf(GTK_IMAGE(referencias[0]), escalado);
+                    g_object_unref(escalado);
+                }
+            }
+            g_object_unref(loader);
+            g_free(contenido);
+        }
+        g_free(ruta);
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void mostrar_formulario_nuevo_colaborador(ContextoColaboradores *ctx) {
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Nuevo Colaborador", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "Cancelar", GTK_RESPONSE_CANCEL,
+        "Crear", GTK_RESPONSE_ACCEPT,
+        NULL);
+    gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
+
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
+    gtk_container_add(GTK_CONTAINER(area), caja);
+
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+    gtk_box_pack_start(GTK_BOX(caja), grid, FALSE, FALSE, 0);
+
+    GtkWidget *lbl_user = gtk_label_new("Usuario:");
+    gtk_widget_set_halign(lbl_user, GTK_ALIGN_END);
+    GtkWidget *entrada_user = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), lbl_user, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entrada_user, 1, 0, 1, 1);
+
+    GtkWidget *lbl_pass = gtk_label_new("Contrasena:");
+    gtk_widget_set_halign(lbl_pass, GTK_ALIGN_END);
+    GtkWidget *entrada_pass = gtk_entry_new();
+    gtk_entry_set_visibility(GTK_ENTRY(entrada_pass), FALSE);
+    agregar_boton_ver_password(entrada_pass);
+    gtk_entry_set_input_purpose(GTK_ENTRY(entrada_pass), GTK_INPUT_PURPOSE_PASSWORD);
+    gtk_grid_attach(GTK_GRID(grid), lbl_pass, 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entrada_pass, 1, 1, 1, 1);
+
+    GtkWidget *lbl_rol = gtk_label_new("Rol:");
+    gtk_widget_set_halign(lbl_rol, GTK_ALIGN_END);
+    GtkWidget *combo_rol = gtk_combo_box_text_new();
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "0", "Administrador");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "1", "Veterinario");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "2", "Voluntario");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "3", "Rescatista");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_rol), "4", "Recepcionista");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(combo_rol), 2);
+    gtk_grid_attach(GTK_GRID(grid), lbl_rol, 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), combo_rol, 1, 2, 1, 1);
+
+    GtkWidget *lbl_foto = gtk_label_new("Foto:");
+    gtk_widget_set_halign(lbl_foto, GTK_ALIGN_END);
+    GtkWidget *caja_foto = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *imagen_preview = gtk_image_new_from_icon_name("avatar-default-symbolic", GTK_ICON_SIZE_DIALOG);
+    GtkWidget *btn_foto = gtk_button_new_with_label("Elegir foto... (opcional)");
+    gtk_box_pack_start(GTK_BOX(caja_foto), imagen_preview, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(caja_foto), btn_foto, FALSE, FALSE, 0);
+    gtk_grid_attach(GTK_GRID(grid), lbl_foto, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), caja_foto, 1, 3, 1, 1);
+
+    GtkWidget *referencias_foto[2];
+    referencias_foto[0] = imagen_preview;
+    referencias_foto[1] = dialogo;
+    g_signal_connect(btn_foto, "clicked", G_CALLBACK(on_elegir_foto_clicked), referencias_foto);
+
+    gtk_entry_set_activates_default(GTK_ENTRY(entrada_user), TRUE);
+    gtk_entry_set_activates_default(GTK_ENTRY(entrada_pass), TRUE);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_ACCEPT);
+
+    mostrar_con_fundido(dialogo);
+    gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+
+    if (respuesta == GTK_RESPONSE_ACCEPT) {
+        const char *usuario = gtk_entry_get_text(GTK_ENTRY(entrada_user));
+        const char *pass = gtk_entry_get_text(GTK_ENTRY(entrada_pass));
+        const char *rol_texto = gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo_rol));
+        int rol = rol_texto ? atoi(rol_texto) : 2;
+        const char *foto_b64 = (const char *)g_object_get_data(G_OBJECT(imagen_preview), "foto_base64");
+
+        if (usuario[0] == '\0' || strlen(pass) < 4) {
+            gtk_widget_destroy(dialogo);
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Usuario invalido o contrasena muy corta (minimo 4 caracteres).", TRUE);
+            return;
+        }
+
+        gboolean ok = (usuario_registrar(usuario, pass, rol, foto_b64 ? foto_b64 : "") == 0);
+        gtk_widget_destroy(dialogo);
+
+        if (ok) {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Colaborador creado correctamente.", FALSE);
+            cargar_colaboradores(ctx);
+        } else {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo crear (ese usuario ya existe).", TRUE);
+        }
+        return;
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void on_agregar_colaborador_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    mostrar_formulario_nuevo_colaborador((ContextoColaboradores *)datos);
+}
+
+static void abrir_pantalla_administrar_colaboradores(GtkWindow *padre, Rol rol) {
+    if (rol != ROL_ADMIN) {
+        mostrar_mensaje(padre, "Requiere rol Administrador.", TRUE);
+        return;
+    }
+
+    ContextoColaboradores *ctx = g_malloc0(sizeof(ContextoColaboradores));
+
+    GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    ctx->ventana = ventana;
+    gtk_window_set_title(GTK_WINDOW(ventana), "Administrar Colaboradores");
+    gtk_window_set_default_size(GTK_WINDOW(ventana), 420, 420);
+    gtk_window_set_transient_for(GTK_WINDOW(ventana), padre);
+    gtk_window_set_position(GTK_WINDOW(ventana), GTK_WIN_POS_CENTER_ON_PARENT);
+    gtk_container_set_border_width(GTK_CONTAINER(ventana), 14);
+    /* g_signal_connect_swapped (no g_signal_connect normal): asi GTK
+     * llama g_free(ctx) directo. Con g_signal_connect normal el
+     * callback recibe (ventana, ctx) y terminaria intentando liberar
+     * la ventana misma con g_free(), lo cual corrompe la memoria. */
+    g_signal_connect_swapped(ventana, "destroy", G_CALLBACK(g_free), ctx);
+
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(ventana), caja);
+
+    ctx->store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
+    ctx->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->store));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(ctx->treeview),
+        gtk_tree_view_column_new_with_attributes("Usuario", gtk_cell_renderer_text_new(), "text", 0, NULL));
+    gtk_tree_view_append_column(GTK_TREE_VIEW(ctx->treeview),
+        gtk_tree_view_column_new_with_attributes("Rol", gtk_cell_renderer_text_new(), "text", 1, NULL));
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_container_add(GTK_CONTAINER(scroll), ctx->treeview);
+    gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
+
+    cargar_colaboradores(ctx);
+
+    GtkWidget *btn_agregar = gtk_button_new_with_label("+ Agregar Colaborador");
+    gtk_box_pack_start(GTK_BOX(caja), btn_agregar, FALSE, FALSE, 0);
+    g_signal_connect(btn_agregar, "clicked", G_CALLBACK(on_agregar_colaborador_clicked), ctx);
+
+    GtkWidget *btn_cerrar = gtk_button_new_with_label("Cerrar");
+    gtk_box_pack_start(GTK_BOX(caja), btn_cerrar, FALSE, FALSE, 0);
+    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
+
+    mostrar_con_fundido(ventana);
+}
+
+static void on_administrar_colaboradores_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    abrir_pantalla_administrar_colaboradores(GTK_WINDOW(d->ventana_principal), d->rol);
+}
+
+/* Dice si el rol dado tiene acceso al modulo "indice" (mismo orden
+ * que nombres_modulos[] mas abajo):
+ *   0=Mascotas 1=Vacunas 2=Adopciones 3=Donantes 4=Reportes
+ *   5=Procesos 6=Memoria 7=Respaldo 8=Alertas 9=AdministrarColaboradores
+ * Administrador siempre tiene acceso a todo. Veterinario y Voluntario
+ * mantienen las mismas reglas de antes; Rescatista y Recepcionista
+ * son roles mas acotados, pensados para tareas especificas. */
+static gboolean modulo_permitido(Rol rol, int indice) {
+    if (rol == ROL_ADMIN) return TRUE;
+
+    switch (rol) {
+        case ROL_VETERINARIO:
+            return !(indice == 5 || indice == 6 || indice == 9 || indice == 10 || indice == 11);
+        case ROL_VOLUNTARIO:
+            return !(indice == 3 || indice == 4 || indice == 5 || indice == 6 || indice == 9 || indice == 10 || indice == 11);
+        case ROL_RESCATISTA:
+            return (indice == 0 || indice == 8);
+        case ROL_RECEPCIONISTA:
+            return (indice == 2 || indice == 3);
+        default:
+            return FALSE;
+    }
+}
+
+/* Cambia el rol (Jefe/Supervisor/Administrador) de un Cliente ya
+ * registrado -- necesario porque el registro publico ya no deja
+ * elegirlo (ver mostrar_registro_cliente). Solo Administrador. */
+static void on_cambiar_rol_cliente_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    GtkTreeView *vista = GTK_TREE_VIEW(datos);
+    GtkTreeSelection *seleccion = gtk_tree_view_get_selection(vista);
+    GtkTreeModel *modelo;
+    GtkTreeIter iter;
+    if (!gtk_tree_selection_get_selected(seleccion, &modelo, &iter)) {
+        mostrar_mensaje(NULL, "Selecciona un Cliente de la lista primero.", TRUE);
+        return;
+    }
+    gint id_cliente;
+    gtk_tree_model_get(modelo, &iter, 0, &id_cliente, -1);
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Cambiar rol", NULL, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "0", "Jefe");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "1", "Supervisor");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "2", "Administrador");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+    gtk_container_set_border_width(GTK_CONTAINER(combo), 12);
+    gtk_container_add(GTK_CONTAINER(area), combo);
+    mostrar_con_fundido(dialogo);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        const gchar *id_texto = gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo));
+        RolCliente nuevo_rol = id_texto ? (RolCliente)atoi(id_texto) : ROL_CLIENTE_JEFE;
+        if (cliente_actualizar_rol(id_cliente, nuevo_rol) == 0) {
+            gtk_list_store_set(GTK_LIST_STORE(modelo), &iter, 2, cliente_rol_nombre(nuevo_rol), -1);
+            mostrar_mensaje(NULL, "Rol actualizado.", FALSE);
+        } else {
+            mostrar_mensaje(NULL, "No se pudo actualizar el rol.", TRUE);
+        }
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void on_administrar_clientes_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    GtkWindow *padre = (d && d->ventana_principal) ? GTK_WINDOW(d->ventana_principal) : NULL;
+    if (!d || d->rol != ROL_ADMIN) {
+        mostrar_mensaje(padre, "Solo el Administrador puede administrar Clientes.", TRUE);
+        return;
+    }
+
+    GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(ventana), "Administrar Clientes");
+    gtk_window_set_default_size(GTK_WINDOW(ventana), 520, 400);
+    gtk_window_set_transient_for(GTK_WINDOW(ventana), padre);
+    gtk_window_set_position(GTK_WINDOW(ventana), GTK_WIN_POS_CENTER_ON_PARENT);
+
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 12);
+    gtk_container_add(GTK_CONTAINER(ventana), caja);
+
+    GtkListStore *store = gtk_list_store_new(4, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+    Cliente *lista = NULL;
+    int n = 0;
+    cliente_listar(&lista, &n);
+    for (int i = 0; i < n; i++) {
+        GtkTreeIter iter;
+        gtk_list_store_append(store, &iter);
+        gtk_list_store_set(store, &iter,
+            0, lista[i].id,
+            1, lista[i].nombre,
+            2, cliente_rol_nombre(lista[i].rol),
+            3, lista[i].correo,
+            -1);
+    }
+    free(lista);
+
+    GtkWidget *vista = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+    g_object_unref(store);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(vista), -1, "Nombre", gtk_cell_renderer_text_new(), "text", 1, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(vista), -1, "Rol actual", gtk_cell_renderer_text_new(), "text", 2, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(vista), -1, "Correo", gtk_cell_renderer_text_new(), "text", 3, NULL);
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_container_add(GTK_CONTAINER(scroll), vista);
+    gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
+
+    GtkWidget *btn_cambiar = gtk_button_new_with_label("Cambiar rol del seleccionado");
+    g_signal_connect(btn_cambiar, "clicked", G_CALLBACK(on_cambiar_rol_cliente_clicked), vista);
+    gtk_box_pack_start(GTK_BOX(caja), btn_cambiar, FALSE, FALSE, 0);
+
+    GtkWidget *btn_cerrar = gtk_button_new_with_label("Cerrar");
+    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
+    gtk_box_pack_start(GTK_BOX(caja), btn_cerrar, FALSE, FALSE, 0);
+
+    mostrar_con_fundido(ventana);
+}
+
+/* Pantalla de Administrador para guardar las credenciales de correo
+ * (Gmail) y WhatsApp (Green API) usadas por Agenda de Vacunas para
+ * mandar recordatorios de citas. El formulario mismo NO escribe el
+ * archivo de configuracion -- solo llama (via sudo) al script
+ * pawos-configurar-notificaciones, el unico con permiso de escribir
+ * /etc/pawos/notificaciones.conf (protegido, 600, root:root). */
+static void on_configurar_notificaciones_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    DatosBotonModulo *d = (DatosBotonModulo *)datos;
+    GtkWindow *padre = (d && d->ventana_principal) ? GTK_WINDOW(d->ventana_principal) : NULL;
+    if (!d || d->rol != ROL_ADMIN) {
+        mostrar_mensaje(padre, "Solo el Administrador puede configurar las notificaciones.", TRUE);
+        return;
+    }
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Configurar Notificaciones", padre, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_OK, NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dialogo), 420, -1);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 14);
+    gtk_container_add(GTK_CONTAINER(area), grid);
+
+    GtkWidget *aviso = gtk_label_new(
+        "Credenciales para mandar recordatorios de citas por correo y WhatsApp.\n"
+        "Se guardan protegidas en el sistema (no se muestran de vuelta).");
+    gtk_label_set_line_wrap(GTK_LABEL(aviso), TRUE);
+    gtk_grid_attach(GTK_GRID(grid), aviso, 0, 0, 2, 1);
+
+    GtkWidget *e_gmail_user = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_gmail_user), "correo@gmail.com");
+    GtkWidget *e_gmail_pass = gtk_entry_new();
+    gtk_entry_set_visibility(GTK_ENTRY(e_gmail_pass), FALSE);
+    agregar_boton_ver_password(e_gmail_pass);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_gmail_pass), "Contrasena de aplicacion (16 caracteres)");
+    GtkWidget *e_green_url = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_green_url), "https://XXXX.api.greenapi.com");
+    GtkWidget *e_green_id = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_green_id), "idInstance");
+    GtkWidget *e_green_token = gtk_entry_new();
+    gtk_entry_set_visibility(GTK_ENTRY(e_green_token), FALSE);
+    agregar_boton_ver_password(e_green_token);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_green_token), "apiTokenInstance");
+
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Correo Gmail:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_gmail_user, 1, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Contrasena de app:"), 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_gmail_pass, 1, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Green API URL:"), 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_green_url, 1, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Green API idInstance:"), 0, 4, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_green_id, 1, 4, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Green API apiToken:"), 0, 5, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_green_token, 1, 5, 1, 1);
+
+    mostrar_con_fundido(dialogo);
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        const char *gmail_user = gtk_entry_get_text(GTK_ENTRY(e_gmail_user));
+        const char *gmail_pass = gtk_entry_get_text(GTK_ENTRY(e_gmail_pass));
+        const char *green_url = gtk_entry_get_text(GTK_ENTRY(e_green_url));
+        const char *green_id = gtk_entry_get_text(GTK_ENTRY(e_green_id));
+        const char *green_token = gtk_entry_get_text(GTK_ENTRY(e_green_token));
+
+        if (!gmail_user[0] || !gmail_pass[0] || !green_url[0] || !green_id[0] || !green_token[0]) {
+            mostrar_mensaje(padre, "Completa todos los campos.", TRUE);
+        } else {
+            FILE *proceso = popen("sudo /usr/local/bin/pawos-configurar-notificaciones", "w");
+            if (!proceso) {
+                mostrar_mensaje(padre, "No se pudo iniciar el guardado de la configuracion.", TRUE);
+            } else {
+                fprintf(proceso, "%s\n%s\n%s\n%s\n%s\n", gmail_user, gmail_pass, green_url, green_id, green_token);
+                int rc = pclose(proceso);
+                if (rc == 0) {
+                    mostrar_mensaje(padre, "Configuracion guardada correctamente.", FALSE);
+                } else {
+                    mostrar_mensaje(padre, "No se pudo guardar la configuracion (revisa permisos de sudo).", TRUE);
+                }
+            }
+        }
+    }
+    gtk_widget_destroy(dialogo);
 }
 
 static void construir_ventana_principal(Rol rol, const char *usuario) {
@@ -3119,8 +4069,10 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     GtkWidget *badge_rol = gtk_label_new(auth_rol_nombre(rol));
     gtk_style_context_add_class(gtk_widget_get_style_context(badge_rol), "badge");
     const char *clase_badge =
-        (rol == ROL_ADMIN)       ? "badge-admin" :
-        (rol == ROL_VETERINARIO) ? "badge-veterinario" : "badge-voluntario";
+        (rol == ROL_ADMIN)         ? "badge-admin" :
+        (rol == ROL_VETERINARIO)   ? "badge-veterinario" :
+        (rol == ROL_RESCATISTA)    ? "badge-rescatista" :
+        (rol == ROL_RECEPCIONISTA) ? "badge-recepcionista" : "badge-voluntario";
     gtk_style_context_add_class(gtk_widget_get_style_context(badge_rol), clase_badge);
     gtk_box_pack_start(GTK_BOX(fila_usuario), badge_rol, FALSE, FALSE, 0);
 
@@ -3141,6 +4093,9 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "Administracion de Memoria",
         "Respaldo en la Nube",
         "Alertas de Sensores",
+        "Administrar Colaboradores",
+        "Configurar Notificaciones",
+        "Administrar Clientes",
     };
     /* Icono (emoji) por modulo, solo cosmetico -- no afecta la logica. */
     const char *iconos_modulos[] = {
@@ -3153,6 +4108,9 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "\xF0\x9F\xA7\xA0", /* brain */
         "\xE2\x98\x81",     /* cloud */
         "\xF0\x9F\x9A\xA8", /* siren */
+        "\xF0\x9F\x91\xA5", /* people */
+        "\xF0\x9F\x93\xA7", /* envelope */
+        "\xF0\x9F\x9B\x82", /* briefcase */
     };
     /* Categoria por modulo (solo cosmetica, define el color del boton):
      * refugio = atencion directa al animal, gestion = administrativo,
@@ -3160,6 +4118,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     const char *categorias_modulos[] = {
         "cat-refugio", "cat-refugio", "cat-refugio", "cat-gestion",
         "cat-gestion", "cat-sistema", "cat-sistema", "cat-gestion", "cat-refugio",
+        "cat-gestion", "cat-gestion", "cat-gestion",
     };
     GCallback manejadores[] = {
         G_CALLBACK(on_mascotas_clicked),
@@ -3171,8 +4130,11 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         G_CALLBACK(on_memoria_clicked),
         G_CALLBACK(on_respaldo_clicked),
         G_CALLBACK(on_alertas_clicked),
+        G_CALLBACK(on_administrar_colaboradores_clicked),
+        G_CALLBACK(on_configurar_notificaciones_clicked),
+        G_CALLBACK(on_administrar_clientes_clicked),
     };
-    const int total_modulos = 9;
+    const int total_modulos = 12;
 
     DatosBotonModulo *datos_botones = g_malloc(sizeof(DatosBotonModulo));
     datos_botones->ventana_principal = ventana;
@@ -3193,15 +4155,9 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         /* Los botones siempre se muestran; solo se deshabilitan (no se
          * ocultan) cuando el rol actual no tiene acceso a ese modulo,
          * igual que ya hacian las pantallas del CLI. */
-        gboolean bloqueado_voluntario = (i == 3 || i == 4);           /* Donantes, Reportes */
-        gboolean bloqueado_no_admin   = (i == 5 || i == 6);           /* Procesos, Memoria */
-
-        if (bloqueado_voluntario && rol == ROL_VOLUNTARIO) {
+        if (!modulo_permitido(rol, i)) {
             gtk_widget_set_sensitive(boton, FALSE);
-            gtk_widget_set_tooltip_text(boton, "Requiere rol Admin o Veterinario.");
-        } else if (bloqueado_no_admin && rol != ROL_ADMIN) {
-            gtk_widget_set_sensitive(boton, FALSE);
-            gtk_widget_set_tooltip_text(boton, "Requiere rol Administrador.");
+            gtk_widget_set_tooltip_text(boton, "Tu rol no tiene acceso a este modulo.");
         }
     }
 
@@ -3210,7 +4166,13 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     gtk_widget_set_halign(btn_actualizar, GTK_ALIGN_CENTER);
     gtk_widget_set_tooltip_text(btn_actualizar, "Busca la ultima version en GitHub y la instala.");
     gtk_box_pack_start(GTK_BOX(caja), btn_actualizar, FALSE, FALSE, 0);
-    g_signal_connect(btn_actualizar, "clicked", G_CALLBACK(on_actualizar_clicked), NULL);
+    g_signal_connect(btn_actualizar, "clicked", G_CALLBACK(on_actualizar_clicked), datos_botones);
+
+    GtkWidget *btn_acerca_de = gtk_button_new_with_label("Acerca de");
+    gtk_widget_set_size_request(btn_acerca_de, 250, 46);
+    gtk_widget_set_halign(btn_acerca_de, GTK_ALIGN_CENTER);
+    gtk_box_pack_start(GTK_BOX(caja), btn_acerca_de, FALSE, FALSE, 0);
+    g_signal_connect(btn_acerca_de, "clicked", G_CALLBACK(on_acerca_de_clicked), datos_botones);
 
     GtkWidget *btn_salir = gtk_button_new_with_label("Salir");
     gtk_style_context_add_class(gtk_widget_get_style_context(btn_salir), "salir");
@@ -3219,15 +4181,825 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     gtk_box_pack_start(GTK_BOX(caja), btn_salir, FALSE, FALSE, 0);
     g_signal_connect_swapped(btn_salir, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
 
-    gtk_widget_show_all(ventana);
+    mostrar_con_fundido(ventana);
 }
 
 /* ---------------------------------------------------------------
  * main
  * --------------------------------------------------------------- */
 
+/* =================================================================
+ * Acceso de Clientes (publico externo: adoptantes y donantes). No es
+ * un rol mas dentro de "usuarios" (esos son Administrador, Veterinario
+ * y Voluntario, el personal del refugio) -- es una cuenta totalmente
+ * aparte, en su propia tabla "clientes" (correo + contrasena), con su
+ * propia ventana simplificada: solo ve las mascotas disponibles para
+ * adopcion y puede solicitar una adopcion o hacer una donacion. No ve
+ * nada de lo interno (procesos, memoria, reportes, vacunas, etc.).
+ * ================================================================= */
+
+enum { RESPUESTA_COLABORADOR = 1, RESPUESTA_CLIENTE = 2, RESPUESTA_REGISTRARME = 3 };
+
+typedef enum { ENTRADA_CANCELAR, ENTRADA_COLABORADOR, ENTRADA_CLIENTE } TipoEntrada;
+
+enum {
+    COL_MC_ID = 0,
+    COL_MC_NOMBRE,
+    COL_MC_ESPECIE,
+    COL_MC_RAZA,
+    COL_MC_EDAD,
+    N_COL_MASCOTAS_CLIENTE
+};
+
+typedef struct {
+    GtkWidget    *ventana;
+    GtkWidget    *treeview;
+    GtkListStore *store;
+    char          nombre_cliente[64];
+    int           id_cliente;
+    RolCliente    rol;
+} ContextoCliente;
+
+static void cargar_mascotas_disponibles(ContextoCliente *ctx) {
+    gtk_list_store_clear(ctx->store);
+
+    Mascota *ms;
+    int n;
+    if (mascota_listar_disponibles(&ms, &n) != 0) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo leer la lista de mascotas.", TRUE);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        GtkTreeIter iter;
+        gtk_list_store_append(ctx->store, &iter);
+        gtk_list_store_set(ctx->store, &iter,
+            COL_MC_ID, ms[i].id,
+            COL_MC_NOMBRE, ms[i].nombre,
+            COL_MC_ESPECIE, ms[i].especie,
+            COL_MC_RAZA, ms[i].raza,
+            COL_MC_EDAD, ms[i].edad,
+            -1);
+    }
+    free(ms);
+}
+
+static void on_refrescar_mascotas_cliente_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    cargar_mascotas_disponibles((ContextoCliente *)datos);
+}
+
+static void on_solicitar_adopcion_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    ContextoCliente *ctx = (ContextoCliente *)datos;
+
+    GtkTreeSelection *sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(ctx->treeview));
+    GtkTreeModel *modelo;
+    GtkTreeIter iter;
+    if (!gtk_tree_selection_get_selected(sel, &modelo, &iter)) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Selecciona primero una mascota de la lista.", TRUE);
+        return;
+    }
+
+    int id_mascota;
+    gchar *nombre_mascota = NULL;
+    gtk_tree_model_get(modelo, &iter, COL_MC_ID, &id_mascota, COL_MC_NOMBRE, &nombre_mascota, -1);
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Solicitar adopcion", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Enviar solicitud", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *cuadricula = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(cuadricula), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(cuadricula), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(cuadricula), 12);
+
+    gchar *texto_mascota = g_strdup_printf("Mascota: %s", nombre_mascota);
+    GtkWidget *lbl_mascota = gtk_label_new(texto_mascota);
+    g_free(texto_mascota);
+    gtk_widget_set_halign(lbl_mascota, GTK_ALIGN_START);
+
+    GtkWidget *e_contacto = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_contacto), "Telefono o correo de contacto");
+
+    gtk_grid_attach(GTK_GRID(cuadricula), lbl_mascota, 0, 0, 2, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Tu contacto:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_contacto, 1, 1, 1, 1);
+
+    gtk_container_add(GTK_CONTAINER(area), cuadricula);
+    mostrar_con_fundido(dialogo);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        Adopcion a;
+        memset(&a, 0, sizeof(a));
+        a.mascota_id = id_mascota;
+        snprintf(a.adoptante_nombre, sizeof(a.adoptante_nombre), "%s", ctx->nombre_cliente);
+        snprintf(a.adoptante_contacto, sizeof(a.adoptante_contacto), "%s", gtk_entry_get_text(GTK_ENTRY(e_contacto)));
+        hoy(a.fecha_adopcion, sizeof(a.fecha_adopcion));
+
+        if (adopcion_registrar(&a) == 0) {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana),
+                "Solicitud de adopcion enviada. El refugio se pondra en contacto contigo.", FALSE);
+        } else {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo enviar la solicitud.", TRUE);
+        }
+    }
+    gtk_widget_destroy(dialogo);
+    g_free(nombre_mascota);
+}
+
+static void on_hacer_donacion_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    ContextoCliente *ctx = (ContextoCliente *)datos;
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Hacer una donacion", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Donar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *cuadricula = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(cuadricula), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(cuadricula), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(cuadricula), 12);
+
+    GtkWidget *e_contacto = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_contacto), "Telefono o correo de contacto");
+    GtkWidget *e_monto = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_monto), "0.00");
+
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Tu contacto:"), 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_contacto, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Monto a donar:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_monto, 1, 1, 1, 1);
+
+    gtk_container_add(GTK_CONTAINER(area), cuadricula);
+    mostrar_con_fundido(dialogo);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        Donante d;
+        memset(&d, 0, sizeof(d));
+        snprintf(d.nombre, sizeof(d.nombre), "%s", ctx->nombre_cliente);
+        snprintf(d.contacto, sizeof(d.contacto), "%s", gtk_entry_get_text(GTK_ENTRY(e_contacto)));
+        d.monto = atof(gtk_entry_get_text(GTK_ENTRY(e_monto)));
+        hoy(d.fecha, sizeof(d.fecha));
+
+        if (donante_agregar(&d) == 0) {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Gracias por tu donacion.", FALSE);
+        } else {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo registrar la donacion.", TRUE);
+        }
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+/* Ver mis solicitudes: solo Supervisor y Administrador (de Cliente).
+ * Filtra las adopciones/donaciones ya existentes por nombre, buscando
+ * las que coinciden con el nombre de este cliente. */
+static void on_ver_mis_solicitudes_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    ContextoCliente *ctx = (ContextoCliente *)datos;
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Mis solicitudes", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "_Cerrar", GTK_RESPONSE_CLOSE, NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dialogo), 420, 360);
+
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_container_set_border_width(GTK_CONTAINER(scroll), 10);
+    gtk_container_add(GTK_CONTAINER(area), scroll);
+
+    GtkWidget *lbl = gtk_label_new(NULL);
+    gtk_label_set_line_wrap(GTK_LABEL(lbl), TRUE);
+    gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+    gtk_widget_set_valign(lbl, GTK_ALIGN_START);
+    gtk_container_add(GTK_CONTAINER(scroll), lbl);
+
+    GString *texto = g_string_new(NULL);
+    g_string_append(texto, "<b>Adopciones solicitadas:</b>\n");
+    Adopcion *ads; int n_ads;
+    if (adopcion_listar(&ads, &n_ads) == 0) {
+        int encontradas = 0;
+        for (int i = 0; i < n_ads; i++) {
+            if (g_strcmp0(ads[i].adoptante_nombre, ctx->nombre_cliente) == 0) {
+                gchar *linea = g_markup_printf_escaped(
+                    "  - Mascota #%d, %s\n", ads[i].mascota_id, ads[i].fecha_adopcion);
+                g_string_append(texto, linea);
+                g_free(linea);
+                encontradas++;
+            }
+        }
+        if (encontradas == 0) g_string_append(texto, "  (ninguna todavia)\n");
+        free(ads);
+    }
+
+    g_string_append(texto, "\n<b>Donaciones:</b>\n");
+    Donante *ds; int n_ds;
+    if (donante_listar(&ds, &n_ds) == 0) {
+        int encontradas = 0;
+        for (int i = 0; i < n_ds; i++) {
+            if (g_strcmp0(ds[i].nombre, ctx->nombre_cliente) == 0) {
+                gchar *linea = g_markup_printf_escaped(
+                    "  - $%.2f, %s\n", ds[i].monto, ds[i].fecha);
+                g_string_append(texto, linea);
+                g_free(linea);
+                encontradas++;
+            }
+        }
+        if (encontradas == 0) g_string_append(texto, "  (ninguna todavia)\n");
+        free(ds);
+    }
+
+    gtk_label_set_markup(GTK_LABEL(lbl), texto->str);
+    g_string_free(texto, TRUE);
+
+    mostrar_con_fundido(dialogo);
+    gtk_dialog_run(GTK_DIALOG(dialogo));
+    gtk_widget_destroy(dialogo);
+}
+
+/* Editar mi cuenta: solo Administrador (de Cliente). Cambia nombre y,
+ * opcionalmente, contrasena (si se deja en blanco, no se toca). */
+static void on_editar_cuenta_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    ContextoCliente *ctx = (ContextoCliente *)datos;
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Editar mi cuenta", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *cuadricula = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(cuadricula), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(cuadricula), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(cuadricula), 12);
+
+    GtkWidget *e_nombre = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(e_nombre), ctx->nombre_cliente);
+    GtkWidget *e_password = gtk_entry_new();
+    gtk_entry_set_visibility(GTK_ENTRY(e_password), FALSE);
+    agregar_boton_ver_password(e_password);
+    gtk_entry_set_input_purpose(GTK_ENTRY(e_password), GTK_INPUT_PURPOSE_PASSWORD);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_password), "(dejar en blanco para no cambiarla)");
+
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nombre:"), 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_nombre, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nueva contrasena:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_password, 1, 1, 1, 1);
+
+    gtk_container_add(GTK_CONTAINER(area), cuadricula);
+    mostrar_con_fundido(dialogo);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+        const char *nombre_nuevo = gtk_entry_get_text(GTK_ENTRY(e_nombre));
+        const char *password_nueva = gtk_entry_get_text(GTK_ENTRY(e_password));
+        if (nombre_nuevo[0] && cliente_actualizar(ctx->id_cliente, nombre_nuevo, password_nueva) == 0) {
+            snprintf(ctx->nombre_cliente, sizeof(ctx->nombre_cliente), "%s", nombre_nuevo);
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Cuenta actualizada.", FALSE);
+        } else {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo actualizar la cuenta.", TRUE);
+        }
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void construir_ventana_cliente(const Cliente *cliente) {
+    ContextoCliente *ctx = g_malloc0(sizeof(ContextoCliente));
+    snprintf(ctx->nombre_cliente, sizeof(ctx->nombre_cliente), "%s", cliente->nombre);
+    ctx->id_cliente = cliente->id;
+    ctx->rol = cliente->rol;
+
+    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS Refugio - Acceso de Clientes");
+    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 700, 460);
+    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
+
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+
+    gchar *texto_bienvenida = g_strdup_printf(
+        "<span size='large' weight='bold'>\xC2\xA1Hola, %s!</span> (%s)",
+        ctx->nombre_cliente, cliente_rol_nombre(ctx->rol));
+    GtkWidget *titulo = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(titulo), texto_bienvenida);
+    g_free(texto_bienvenida);
+    gtk_widget_set_halign(titulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+    GtkWidget *subtitulo = gtk_label_new("Estas son las mascotas disponibles para adopcion:");
+    gtk_widget_set_halign(subtitulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), subtitulo, FALSE, FALSE, 0);
+
+    ctx->store = gtk_list_store_new(N_COL_MASCOTAS_CLIENTE,
+        G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT);
+    ctx->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->store));
+    g_object_unref(ctx->store);
+
+    const char *encabezados[N_COL_MASCOTAS_CLIENTE] = {"ID", "Nombre", "Especie", "Raza", "Edad"};
+    for (int i = 0; i < N_COL_MASCOTAS_CLIENTE; i++) {
+        GtkCellRenderer *render = gtk_cell_renderer_text_new();
+        GtkTreeViewColumn *col = gtk_tree_view_column_new_with_attributes(
+            encabezados[i], render, "text", i, NULL);
+        gtk_tree_view_column_set_resizable(col, TRUE);
+        gtk_tree_view_append_column(GTK_TREE_VIEW(ctx->treeview), col);
+    }
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_container_add(GTK_CONTAINER(scroll), ctx->treeview);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
+
+    GtkWidget *fila_botones = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_pack_start(GTK_BOX(caja), fila_botones, FALSE, FALSE, 0);
+
+    GtkWidget *btn_refrescar = gtk_button_new_with_label("Actualizar lista");
+    GtkWidget *btn_adoptar   = gtk_button_new_with_label("Solicitar adopcion");
+    GtkWidget *btn_donar     = gtk_button_new_with_label("Hacer una donacion");
+    GtkWidget *btn_salir     = gtk_button_new_with_label("Cerrar sesion");
+
+    gtk_box_pack_start(GTK_BOX(fila_botones), btn_refrescar, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(fila_botones), btn_adoptar, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(fila_botones), btn_donar, FALSE, FALSE, 0);
+
+    if (ctx->rol >= ROL_CLIENTE_SUPERVISOR) {
+        GtkWidget *btn_historial = gtk_button_new_with_label("Ver mis solicitudes");
+        gtk_box_pack_start(GTK_BOX(fila_botones), btn_historial, FALSE, FALSE, 0);
+        g_signal_connect(btn_historial, "clicked", G_CALLBACK(on_ver_mis_solicitudes_clicked), ctx);
+    }
+    if (ctx->rol >= ROL_CLIENTE_ADMIN) {
+        GtkWidget *btn_editar = gtk_button_new_with_label("Editar mi cuenta");
+        gtk_box_pack_start(GTK_BOX(fila_botones), btn_editar, FALSE, FALSE, 0);
+        g_signal_connect(btn_editar, "clicked", G_CALLBACK(on_editar_cuenta_clicked), ctx);
+    }
+
+    gtk_box_pack_end(GTK_BOX(fila_botones), btn_salir, FALSE, FALSE, 0);
+
+    g_signal_connect(btn_refrescar, "clicked", G_CALLBACK(on_refrescar_mascotas_cliente_clicked), ctx);
+    g_signal_connect(btn_adoptar, "clicked", G_CALLBACK(on_solicitar_adopcion_clicked), ctx);
+    g_signal_connect(btn_donar, "clicked", G_CALLBACK(on_hacer_donacion_clicked), ctx);
+    g_signal_connect_swapped(btn_salir, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
+    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+    cargar_mascotas_disponibles(ctx);
+    mostrar_con_fundido(ctx->ventana);
+}
+
+/* Formulario para crear una cuenta de Cliente nueva (correo, nombre,
+ * contrasena), llamado desde el boton "Registrarme" del login de
+ * clientes. Devuelve TRUE y llena nombre_out si se creo la cuenta. */
+static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Crear cuenta de Cliente", NULL, GTK_DIALOG_MODAL,
+        "Cancelar", GTK_RESPONSE_CANCEL,
+        "Crear cuenta", GTK_RESPONSE_ACCEPT,
+        NULL);
+    gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
+
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 14);
+    gtk_container_add(GTK_CONTAINER(area), grid);
+
+    GtkWidget *e_nombre = gtk_entry_new();
+    GtkWidget *e_correo = gtk_entry_new();
+    GtkWidget *e_password = gtk_entry_new();
+    gtk_entry_set_visibility(GTK_ENTRY(e_password), FALSE);
+    agregar_boton_ver_password(e_password);
+    gtk_entry_set_input_purpose(GTK_ENTRY(e_password), GTK_INPUT_PURPOSE_PASSWORD);
+
+    GtkWidget *e_telefono = gtk_entry_new();
+    gtk_entry_set_input_purpose(GTK_ENTRY(e_telefono), GTK_INPUT_PURPOSE_PHONE);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_telefono), "Ej: 50412345678 (con codigo de pais)");
+
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Nombre:"), 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_nombre, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Correo:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_correo, 1, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Contrasena:"), 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_password, 1, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Telefono (WhatsApp):"), 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_telefono, 1, 3, 1, 1);
+
+    mostrar_con_fundido(dialogo);
+
+    gboolean creado = FALSE;
+    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_ACCEPT) {
+        const char *nombre = gtk_entry_get_text(GTK_ENTRY(e_nombre));
+        const char *correo = gtk_entry_get_text(GTK_ENTRY(e_correo));
+        const char *password = gtk_entry_get_text(GTK_ENTRY(e_password));
+        const char *telefono = gtk_entry_get_text(GTK_ENTRY(e_telefono));
+        /* Ya no se deja elegir el rol al registrarse: si cualquiera
+         * pudiera auto-asignarse el nivel mas alto, nadie elegiria uno
+         * mas bajo y la jerarquia no serviria de nada. Todo Cliente
+         * nuevo entra en el nivel base; el Administrador del refugio
+         * lo puede subir despues desde "Administrar Clientes". */
+        RolCliente rol_elegido = ROL_CLIENTE_JEFE;
+        if (nombre[0] && correo[0] && password[0]) {
+            if (cliente_registrar(correo, password, nombre, telefono, rol_elegido) == 0
+                && cliente_autenticar(correo, password, cliente_out) == 0) {
+                creado = TRUE;
+            } else {
+                mostrar_mensaje(NULL, "No se pudo crear la cuenta (el correo ya podria estar registrado).", TRUE);
+            }
+        } else {
+            mostrar_mensaje(NULL, "Completa todos los campos.", TRUE);
+        }
+    }
+    gtk_widget_destroy(dialogo);
+    return creado;
+}
+
+/* Login de Clientes (correo/contrasena, tabla "clientes"). Si todavia
+ * no tiene cuenta, el boton "Registrarme" la crea ahi mismo. Hasta 3
+ * intentos fallidos (crear cuenta no cuenta como intento). Devuelve
+ * TRUE y llena nombre_out si el login (o el registro) fue exitoso. */
+static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_out) {
+    int intentos = 0;
+    const int max_intentos = 3;
+    gboolean no_registrado = FALSE;
+
+    while (intentos < max_intentos) {
+        GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+            "PawOS - Acceso de Clientes", NULL, GTK_DIALOG_MODAL,
+            "Regresar", GTK_RESPONSE_CANCEL,
+            "Registrarme", RESPUESTA_REGISTRARME,
+            "Ingresar", GTK_RESPONSE_ACCEPT,
+            NULL);
+        gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
+
+        GtkWidget *area_contenido = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+        GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
+        gtk_container_add(GTK_CONTAINER(area_contenido), caja);
+
+        GtkWidget *titulo = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(titulo),
+            "<span size='large' weight='bold'>\xF0\x9F\x90\xBE Acceso de Clientes</span>");
+        gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+        GtkWidget *grid = gtk_grid_new();
+        gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+        gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+        gtk_box_pack_start(GTK_BOX(caja), grid, FALSE, FALSE, 0);
+
+        GtkWidget *lbl_correo = gtk_label_new("Correo:");
+        gtk_widget_set_halign(lbl_correo, GTK_ALIGN_END);
+        GtkWidget *entrada_correo = gtk_entry_new();
+        gtk_grid_attach(GTK_GRID(grid), lbl_correo, 0, 0, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_correo, 1, 0, 1, 1);
+
+        GtkWidget *lbl_password = gtk_label_new("Contrasena:");
+        gtk_widget_set_halign(lbl_password, GTK_ALIGN_END);
+        GtkWidget *entrada_password = gtk_entry_new();
+        gtk_entry_set_visibility(GTK_ENTRY(entrada_password), FALSE);
+        agregar_boton_ver_password(entrada_password);
+        gtk_entry_set_input_purpose(GTK_ENTRY(entrada_password), GTK_INPUT_PURPOSE_PASSWORD);
+        gtk_grid_attach(GTK_GRID(grid), lbl_password, 0, 1, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_password, 1, 1, 1, 1);
+
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_correo), TRUE);
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_password), TRUE);
+        gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_ACCEPT);
+
+        if (intentos > 0) {
+            GtkWidget *lbl_error = gtk_label_new(NULL);
+            gtk_widget_set_halign(lbl_error, GTK_ALIGN_START);
+            gchar *texto_error = no_registrado
+                ? g_strdup_printf(
+                    "<span foreground='red'>Ese correo no esta registrado. Intento %d de %d.</span>",
+                    intentos, max_intentos)
+                : g_strdup_printf(
+                    "<span foreground='red'>Correo o contrasena incorrectos. Intento %d de %d.</span>",
+                    intentos, max_intentos);
+            gtk_label_set_markup(GTK_LABEL(lbl_error), texto_error);
+            g_free(texto_error);
+            gtk_box_pack_start(GTK_BOX(caja), lbl_error, FALSE, FALSE, 0);
+        }
+
+        mostrar_con_fundido(dialogo);
+        gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+
+        if (respuesta == RESPUESTA_REGISTRARME) {
+            gtk_widget_destroy(dialogo);
+            if (mostrar_registro_cliente(cliente_out)) {
+                mostrar_mensaje(NULL, "Cuenta creada. Bienvenido a PawOS.", FALSE);
+                if (es_admin_out) *es_admin_out = FALSE;
+                return TRUE;
+            }
+            continue;
+        }
+
+        if (respuesta != GTK_RESPONSE_ACCEPT) {
+            gtk_widget_destroy(dialogo);
+            return FALSE;
+        }
+
+        const char *correo_ingresado = gtk_entry_get_text(GTK_ENTRY(entrada_correo));
+        const char *password_ingresado = gtk_entry_get_text(GTK_ENTRY(entrada_password));
+
+        /* Acceso oculto para el Administrador: sin boton en ningun
+         * lado, a proposito. Si lo que se escribio aqui coincide con
+         * las credenciales REALES del Administrador (tabla "usuarios",
+         * no "clientes"), se abre la ventana completa de Administrador
+         * en vez de la de Cliente. */
+        int rol_secreto = -1;
+        if (usuario_autenticar(correo_ingresado, password_ingresado, &rol_secreto) == 0
+            && rol_secreto == ROL_ADMIN) {
+            /* Copiar el texto ANTES de destruir el dialogo: una vez
+             * destruido, "correo_ingresado" (que apunta al buffer
+             * interno del GtkEntry) queda invalido -- leerlo despues
+             * es memoria ya liberada (use-after-free). */
+            snprintf(cliente_out->nombre, sizeof(cliente_out->nombre), "%s", correo_ingresado);
+            gtk_widget_destroy(dialogo);
+            if (es_admin_out) *es_admin_out = TRUE;
+            return TRUE;
+        }
+
+        gboolean ok = (cliente_autenticar(correo_ingresado, password_ingresado, cliente_out) == 0);
+        gtk_widget_destroy(dialogo);
+
+        if (ok) {
+            if (es_admin_out) *es_admin_out = FALSE;
+            return TRUE;
+        }
+        no_registrado = !cliente_existe(correo_ingresado);
+        intentos++;
+    }
+
+    GtkWidget *aviso = gtk_message_dialog_new(
+        NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+        "Demasiados intentos fallidos.");
+    gtk_dialog_run(GTK_DIALOG(aviso));
+    gtk_widget_destroy(aviso);
+    return FALSE;
+}
+
+/* Primera pantalla al abrir PawOS Refugio: elegir si quien entra es
+ * personal del refugio (Colaborador, login existente contra la tabla
+ * "usuarios") o publico externo (Cliente, tabla "clientes" aparte). */
+static TipoEntrada mostrar_selector_entrada(void) {
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "PawOS Refugio", NULL, GTK_DIALOG_MODAL,
+        "Salir", GTK_RESPONSE_CANCEL,
+        "Soy Colaborador", RESPUESTA_COLABORADOR,
+        "Soy Cliente", RESPUESTA_CLIENTE,
+        NULL);
+    gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
+
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 16);
+    gtk_container_add(GTK_CONTAINER(area), caja);
+
+    GtkWidget *titulo = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(titulo),
+        "<span size='large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
+    gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+    GtkWidget *subtitulo = gtk_label_new("\xC2\xBF" "Como quieres entrar?");
+    gtk_widget_set_halign(subtitulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), subtitulo, FALSE, FALSE, 0);
+
+    mostrar_con_fundido(dialogo);
+    gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+    gtk_widget_destroy(dialogo);
+
+    if (respuesta == RESPUESTA_COLABORADOR) return ENTRADA_COLABORADOR;
+    if (respuesta == RESPUESTA_CLIENTE) return ENTRADA_CLIENTE;
+    return ENTRADA_CANCELAR;
+}
+
+/* Muestra el dialogo de inicio de sesion de PawOS (usuario/contrasena),
+ * usando la misma tabla "usuarios" y la misma funcion de autenticacion
+ * (usuario_autenticar() en db.c, contrasenas guardadas como hash) que ya
+ * usa la version de texto (pantalla_login.c) -- ya NO se usa el usuario
+ * de Linux ni sus grupos para decidir el rol. Hasta 3 intentos, igual
+ * que la version de texto. Devuelve TRUE y llena usuario_out/rol_out si
+ * el login fue correcto, o FALSE si cancelo o agoto los intentos (en
+ * ambos casos el programa debe cerrarse sin abrir la ventana principal). */
+static gboolean mostrar_login_gtk(char *usuario_out, size_t usuario_len, Rol *rol_out) {
+    int intentos = 0;
+    const int max_intentos = 3;
+
+    while (intentos < max_intentos) {
+        GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+            "PawOS - Inicio de sesion", NULL, GTK_DIALOG_MODAL,
+            "Regresar", GTK_RESPONSE_CANCEL,
+            "Ingresar", GTK_RESPONSE_ACCEPT,
+            NULL);
+        gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
+
+        GtkWidget *area_contenido = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+        GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
+        gtk_container_add(GTK_CONTAINER(area_contenido), caja);
+
+        GtkWidget *titulo = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(titulo),
+            "<span size='large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
+        gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+        GtkWidget *grid = gtk_grid_new();
+        gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+        gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+        gtk_box_pack_start(GTK_BOX(caja), grid, FALSE, FALSE, 0);
+
+        GtkWidget *lbl_usuario = gtk_label_new("Usuario:");
+        gtk_widget_set_halign(lbl_usuario, GTK_ALIGN_END);
+        GtkWidget *entrada_usuario = gtk_entry_new();
+        gtk_grid_attach(GTK_GRID(grid), lbl_usuario, 0, 0, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_usuario, 1, 0, 1, 1);
+
+        GtkWidget *lbl_password = gtk_label_new("Contrasena:");
+        gtk_widget_set_halign(lbl_password, GTK_ALIGN_END);
+        GtkWidget *entrada_password = gtk_entry_new();
+        gtk_entry_set_visibility(GTK_ENTRY(entrada_password), FALSE);
+        agregar_boton_ver_password(entrada_password);
+        gtk_entry_set_input_purpose(GTK_ENTRY(entrada_password), GTK_INPUT_PURPOSE_PASSWORD);
+        gtk_grid_attach(GTK_GRID(grid), lbl_password, 0, 1, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_password, 1, 1, 1, 1);
+
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_usuario), TRUE);
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_password), TRUE);
+        gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_ACCEPT);
+
+        if (intentos > 0) {
+            GtkWidget *lbl_error = gtk_label_new(NULL);
+            gtk_widget_set_halign(lbl_error, GTK_ALIGN_START);
+            gchar *texto_error = g_strdup_printf(
+                "<span foreground='red'>Usuario o contrasena incorrectos. Intento %d de %d.</span>",
+                intentos, max_intentos);
+            gtk_label_set_markup(GTK_LABEL(lbl_error), texto_error);
+            g_free(texto_error);
+            gtk_box_pack_start(GTK_BOX(caja), lbl_error, FALSE, FALSE, 0);
+        }
+
+        mostrar_con_fundido(dialogo);
+        gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+
+        if (respuesta != GTK_RESPONSE_ACCEPT) {
+            gtk_widget_destroy(dialogo);
+            return FALSE;
+        }
+
+        const char *usuario_ingresado = gtk_entry_get_text(GTK_ENTRY(entrada_usuario));
+        const char *password_ingresado = gtk_entry_get_text(GTK_ENTRY(entrada_password));
+
+        int rol_db = -1;
+        /* El Administrador ya NO entra por aqui -- Colaborador es solo
+         * para empleados (Veterinario, Voluntario). Si alguien intenta
+         * usar las credenciales del Administrador en este login, se
+         * trata igual que usuario/contrasena incorrectos. */
+        gboolean ok = (usuario_autenticar(usuario_ingresado, password_ingresado, &rol_db) == 0
+                       && rol_db != ROL_ADMIN);
+
+        if (ok) {
+            snprintf(usuario_out, usuario_len, "%s", usuario_ingresado);
+            *rol_out = (Rol)rol_db;
+            gtk_widget_destroy(dialogo);
+            return TRUE;
+        }
+
+        gtk_widget_destroy(dialogo);
+        intentos++;
+    }
+
+    GtkWidget *aviso = gtk_message_dialog_new(
+        NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+        "Demasiados intentos fallidos. Cerrando PawOS.");
+    gtk_dialog_run(GTK_DIALOG(aviso));
+    gtk_widget_destroy(aviso);
+    return FALSE;
+}
+
+/* Asistente de bienvenida: crea la cuenta del primer Administrador.
+ * Solo se muestra si "existe_admin()" dice que todavia no hay
+ * ninguno -- en la practica, eso solo pasa en la version "producto"
+ * (compilada con -DPAWOS_SIN_SEMILLA, ver Makefile: "gui-producto"),
+ * porque la version del curso siempre siembra un Administrador desde
+ * el arranque. No se puede cancelar: hace falta un Administrador
+ * para poder usar el programa. */
+static void mostrar_asistente_bienvenida(void) {
+    GtkWidget *bienvenida = gtk_message_dialog_new(
+        NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+        "Bienvenido a PawOS Refugio");
+    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(bienvenida),
+        "Antes de empezar, vamos a crear la cuenta de Administrador de este refugio.");
+    gtk_dialog_run(GTK_DIALOG(bienvenida));
+    gtk_widget_destroy(bienvenida);
+
+    for (;;) {
+        GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+            "PawOS - Crear Administrador", NULL, GTK_DIALOG_MODAL,
+            "Crear cuenta", GTK_RESPONSE_ACCEPT,
+            NULL);
+        gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
+
+        GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+        GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
+        gtk_container_add(GTK_CONTAINER(area), caja);
+
+        GtkWidget *titulo = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(titulo),
+            "<span size='large' weight='bold'>Cuenta de Administrador</span>");
+        gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
+
+        GtkWidget *grid = gtk_grid_new();
+        gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+        gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+        gtk_box_pack_start(GTK_BOX(caja), grid, FALSE, FALSE, 0);
+
+        GtkWidget *lbl_user = gtk_label_new("Usuario:");
+        gtk_widget_set_halign(lbl_user, GTK_ALIGN_END);
+        GtkWidget *entrada_user = gtk_entry_new();
+        gtk_grid_attach(GTK_GRID(grid), lbl_user, 0, 0, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_user, 1, 0, 1, 1);
+
+        GtkWidget *lbl_pass = gtk_label_new("Contrasena:");
+        gtk_widget_set_halign(lbl_pass, GTK_ALIGN_END);
+        GtkWidget *entrada_pass = gtk_entry_new();
+        gtk_entry_set_visibility(GTK_ENTRY(entrada_pass), FALSE);
+        agregar_boton_ver_password(entrada_pass);
+        gtk_entry_set_input_purpose(GTK_ENTRY(entrada_pass), GTK_INPUT_PURPOSE_PASSWORD);
+        gtk_grid_attach(GTK_GRID(grid), lbl_pass, 0, 1, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_pass, 1, 1, 1, 1);
+
+        GtkWidget *lbl_pass2 = gtk_label_new("Confirmar:");
+        gtk_widget_set_halign(lbl_pass2, GTK_ALIGN_END);
+        GtkWidget *entrada_pass2 = gtk_entry_new();
+        gtk_entry_set_visibility(GTK_ENTRY(entrada_pass2), FALSE);
+        agregar_boton_ver_password(entrada_pass2);
+        gtk_entry_set_input_purpose(GTK_ENTRY(entrada_pass2), GTK_INPUT_PURPOSE_PASSWORD);
+        gtk_grid_attach(GTK_GRID(grid), lbl_pass2, 0, 2, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), entrada_pass2, 1, 2, 1, 1);
+
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_user), TRUE);
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_pass), TRUE);
+        gtk_entry_set_activates_default(GTK_ENTRY(entrada_pass2), TRUE);
+        gtk_dialog_set_default_response(GTK_DIALOG(dialogo), GTK_RESPONSE_ACCEPT);
+
+        mostrar_con_fundido(dialogo);
+        gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
+
+        if (respuesta != GTK_RESPONSE_ACCEPT) {
+            /* Cerrar esta ventana (la X) o cancelar aqui cierra el
+             * programa por completo -- antes esto volvia a abrir la
+             * misma ventana en un ciclo infinito, sin forma de salir. */
+            gtk_widget_destroy(dialogo);
+            db_close();
+            exit(0);
+        }
+
+        char usuario_copia[64];
+        char pass1_copia[64];
+        char pass2_copia[64];
+        snprintf(usuario_copia, sizeof(usuario_copia), "%s", gtk_entry_get_text(GTK_ENTRY(entrada_user)));
+        snprintf(pass1_copia, sizeof(pass1_copia), "%s", gtk_entry_get_text(GTK_ENTRY(entrada_pass)));
+        snprintf(pass2_copia, sizeof(pass2_copia), "%s", gtk_entry_get_text(GTK_ENTRY(entrada_pass2)));
+        gtk_widget_destroy(dialogo);
+
+        const char *error = NULL;
+        if (usuario_copia[0] == '\0') {
+            error = "El usuario no puede estar vacio.";
+        } else if (strlen(pass1_copia) < 4) {
+            error = "La contrasena debe tener al menos 4 caracteres.";
+        } else if (strcmp(pass1_copia, pass2_copia) != 0) {
+            error = "Las contrasenas no coinciden.";
+        }
+
+        if (error) {
+            mostrar_mensaje(NULL, error, TRUE);
+            continue;
+        }
+
+        if (usuario_registrar(usuario_copia, pass1_copia, ROL_ADMIN, "") == 0) {
+            mostrar_mensaje(NULL, "Cuenta de Administrador creada. Ya puedes iniciar sesion.", FALSE);
+            return;
+        }
+        mostrar_mensaje(NULL, "No se pudo crear la cuenta (ese usuario ya existe). Intenta con otro nombre.", TRUE);
+    }
+}
+
 int main(int argc, char **argv) {
     gtk_init(&argc, &argv);
+
+    /* Icono de la app para todas las ventanas: usa la ruta instalada
+     * (la que copia el .deb / instalar-pawos.sh) si existe; si no, cae
+     * al archivo del repo (cuando se corre en desarrollo, sin
+     * instalar). Si ninguna existe no pasa nada -- se queda con el
+     * icono generico de GTK, igual que antes. */
+    if (g_file_test("/usr/share/icons/pawos-icon.png", G_FILE_TEST_EXISTS)) {
+        gtk_window_set_default_icon_from_file("/usr/share/icons/pawos-icon.png", NULL);
+    } else if (g_file_test("branding/pawos-icon.png", G_FILE_TEST_EXISTS)) {
+        gtk_window_set_default_icon_from_file("branding/pawos-icon.png", NULL);
+    }
 
     /* Modo claro/oscuro automatico: se aplica al iniciar segun la
      * preferencia del sistema, y se vuelve a aplicar solo si el usuario
@@ -3240,6 +5012,23 @@ int main(int argc, char **argv) {
                           G_CALLBACK(on_cambio_tema_sistema), NULL);
         g_signal_connect(settings_sistema, "notify::gtk-theme-name",
                           G_CALLBACK(on_cambio_tema_sistema), NULL);
+    }
+    /* Escucha en caliente el ajuste real de GNOME (ver comentario en
+     * modo_oscuro_activo): si el usuario cambia claro/oscuro en
+     * Configuracion del Sistema mientras PawOS esta abierto, esto
+     * reaplica los estilos al instante, sin cerrar y volver a abrir.
+     * Se deja vivo el resto de la ejecucion a proposito, para seguir
+     * escuchando. */
+    GSettingsSchemaSource *fuente_ajustes = g_settings_schema_source_get_default();
+    if (fuente_ajustes) {
+        GSettingsSchema *esquema_interfaz = g_settings_schema_source_lookup(
+            fuente_ajustes, "org.gnome.desktop.interface", TRUE);
+        if (esquema_interfaz) {
+            g_settings_schema_unref(esquema_interfaz);
+            GSettings *ajustes_interfaz = g_settings_new("org.gnome.desktop.interface");
+            g_signal_connect(ajustes_interfaz, "changed::color-scheme",
+                              G_CALLBACK(on_cambio_tema_sistema), NULL);
+        }
     }
 
     const char *ruta_bd = (argc > 1) ? argv[1] : RUTA_BD_DEFECTO;
@@ -3255,13 +5044,54 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Aviso: no se pudo inicializar el sistema de memoria.\n");
     }
 
-    const char *usuario = auth_usuario_actual();
-    Rol rol = auth_rol_actual();
+    if (!existe_admin()) {
+        mostrar_asistente_bienvenida();
+    }
 
-    construir_ventana_principal(rol, usuario);
-    gtk_main();
+    revisar_actualizaciones_al_iniciar();
+
+    for (;;) {
+        TipoEntrada entrada = mostrar_selector_entrada();
+        if (entrada == ENTRADA_CANCELAR) {
+            break;
+        }
+
+        char nombre_sesion[64] = "";
+        gboolean logueado = FALSE;
+
+        if (entrada == ENTRADA_COLABORADOR) {
+            char usuario[32] = "";
+            Rol rol;
+            if (mostrar_login_gtk(usuario, sizeof(usuario), &rol)) {
+                snprintf(nombre_sesion, sizeof(nombre_sesion), "%s", usuario);
+                construir_ventana_principal(rol, usuario);
+                logueado = TRUE;
+            }
+        } else {
+            Cliente cliente_actual;
+            memset(&cliente_actual, 0, sizeof(cliente_actual));
+            gboolean es_admin = FALSE;
+            if (mostrar_login_cliente(&cliente_actual, &es_admin)) {
+                snprintf(nombre_sesion, sizeof(nombre_sesion), "%s", cliente_actual.nombre);
+                if (es_admin) {
+                    construir_ventana_principal(ROL_ADMIN, nombre_sesion);
+                } else {
+                    construir_ventana_cliente(&cliente_actual);
+                }
+                logueado = TRUE;
+            }
+        }
+
+        if (logueado) {
+            gtk_main();
+        }
+        /* Si cancelo el login (boton "Regresar"), o si cerro la
+         * ventana que se abrio, el ciclo vuelve a mostrar el selector
+         * -- el programa NO se cierra solo por eso, unicamente con
+         * "Salir" desde el selector inicial. */
+    }
 
     db_close();
-    printf("Sesion grafica de PawOS finalizada. Hasta pronto, %s.\n", usuario);
+    printf("Sesion grafica de PawOS finalizada. Hasta pronto.\n");
     return 0;
 }
