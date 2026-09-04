@@ -68,6 +68,8 @@ install -m 755 pawos-configurar-notificaciones   "$RAIZ/usr/local/bin/pawos-conf
 install -m 755 pawos-enviar-correo-cita          "$RAIZ/usr/local/bin/pawos-enviar-correo-cita"
 install -m 755 pawos-enviar-whatsapp-cita        "$RAIZ/usr/local/bin/pawos-enviar-whatsapp-cita"
 install -m 755 pawos-generar-pdf-cita.py         "$RAIZ/usr/local/bin/pawos-generar-pdf-cita.py"
+install -m 755 pawos-revisar-version              "$RAIZ/usr/local/bin/pawos-revisar-version"
+install -m 755 pawos-actualizar-deb               "$RAIZ/usr/local/bin/pawos-actualizar-deb"
 
 [ -f branding/pawos-icon.png ] && install -m 644 branding/pawos-icon.png "$RAIZ/usr/share/icons/pawos-icon.png"
 

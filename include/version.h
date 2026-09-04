@@ -9,6 +9,6 @@
  * commits importante). No hace falta tocar nada mas -- el GUI la lee
  * directo de aqui.
  */
-#define PAWOS_VERSION "1.14"
+#define PAWOS_VERSION "1.15"
 
 #endif

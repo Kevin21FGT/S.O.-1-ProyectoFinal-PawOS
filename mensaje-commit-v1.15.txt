@@ -1,0 +1,7 @@
+v1.15: mejoras al sistema de actualizaciones
+
+- El aviso de nuevas versiones ahora funciona correctamente en
+  cualquier equipo, sin importar como se instalo el programa.
+- Ajustes internos para que la instalacion del paquete quede mas
+  completa.
+- Actualizacion de version.

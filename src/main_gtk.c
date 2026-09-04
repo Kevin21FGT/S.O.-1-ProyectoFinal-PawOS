@@ -3308,16 +3308,7 @@ static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
     gint estado_salida = 0;
     GError *error = NULL;
     const gchar *comando =
-        "bash -c '"
-        "REPO_DIR=/opt/pawos-src; RAMA=rama-Kevin; "
-        "git config --global --add safe.directory \"$REPO_DIR\" 2>/dev/null; "
-        "if [ -d \"$REPO_DIR/.git\" ]; then "
-        "  cd \"$REPO_DIR\" || { echo SIN_CONEXION; exit 0; }; "
-        "  git fetch origin \"$RAMA\" >/dev/null 2>&1 || { echo SIN_CONEXION; exit 0; }; "
-        "  LOCAL=$(git rev-parse HEAD); REMOTE=$(git rev-parse origin/$RAMA); "
-        "  if [ \"$LOCAL\" = \"$REMOTE\" ]; then echo AL_DIA; "
-        "  else echo HAY_CAMBIOS; git log \"$LOCAL..$REMOTE\" --no-merges --pretty=format:%s; fi; "
-        "else echo PRIMERA_VEZ; fi'";
+        "/usr/local/bin/pawos-revisar-version \"" PAWOS_VERSION "\"";
 
     gboolean ok = g_spawn_command_line_sync(comando, &salida, &error_salida, &estado_salida, &error);
     gtk_widget_destroy(dialogo_buscando);
@@ -3412,7 +3403,7 @@ static void on_actualizar_clicked(GtkButton *boton, gpointer datos) {
     if (respuesta == GTK_RESPONSE_ACCEPT) {
         GError *error_terminal = NULL;
         gboolean ok_terminal = g_spawn_command_line_async(
-            "x-terminal-emulator -e /usr/local/bin/pawos-actualizar-gui", &error_terminal);
+            "x-terminal-emulator -e /usr/local/bin/pawos-actualizar-deb", &error_terminal);
         if (!ok_terminal) {
             g_warning("No se pudo abrir el actualizador: %s", error_terminal ? error_terminal->message : "error desconocido");
             if (error_terminal) g_error_free(error_terminal);
@@ -3477,16 +3468,7 @@ static void revisar_actualizaciones_al_iniciar(void) {
     gint estado_salida = 0;
     GError *error = NULL;
     const gchar *comando =
-        "bash -c '"
-        "REPO_DIR=/opt/pawos-src; RAMA=rama-Kevin; "
-        "git config --global --add safe.directory \"$REPO_DIR\" 2>/dev/null; "
-        "if [ -d \"$REPO_DIR/.git\" ]; then "
-        "  cd \"$REPO_DIR\" || { echo SIN_CONEXION; exit 0; }; "
-        "  git fetch origin \"$RAMA\" >/dev/null 2>&1 || { echo SIN_CONEXION; exit 0; }; "
-        "  LOCAL=$(git rev-parse HEAD); REMOTE=$(git rev-parse origin/$RAMA); "
-        "  if [ \"$LOCAL\" = \"$REMOTE\" ]; then echo AL_DIA; "
-        "  else echo HAY_CAMBIOS; git log \"$LOCAL..$REMOTE\" --no-merges --pretty=format:%s; fi; "
-        "else echo PRIMERA_VEZ; fi'";
+        "/usr/local/bin/pawos-revisar-version \"" PAWOS_VERSION "\"";
 
     gboolean ok = g_spawn_command_line_sync(comando, &salida, &error_salida, &estado_salida, &error);
     g_free(error_salida);
@@ -3572,7 +3554,7 @@ static void revisar_actualizaciones_al_iniciar(void) {
     if (respuesta == GTK_RESPONSE_ACCEPT) {
         GError *error_terminal = NULL;
         gboolean ok_terminal = g_spawn_command_line_async(
-            "x-terminal-emulator -e /usr/local/bin/pawos-actualizar-gui", &error_terminal);
+            "x-terminal-emulator -e /usr/local/bin/pawos-actualizar-deb", &error_terminal);
         if (!ok_terminal) {
             g_warning("No se pudo abrir el actualizador: %s", error_terminal ? error_terminal->message : "error desconocido");
             if (error_terminal) g_error_free(error_terminal);
