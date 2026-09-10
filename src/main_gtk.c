@@ -309,6 +309,21 @@ static void aplicar_estilos(void) {
     const char *boton_fg         = oscuro ? "#E7ECE4" : "#1C2620";
     const char *boton_borde      = oscuro ? "#3A443B" : "#D7DEDA";
 
+    /* Imagen de fondo de las pantallas de bienvenida: usa la ruta instalada
+     * si existe (.deb), si no cae al archivo del repo (modo desarrollo). */
+    const char *ruta_fondo_bienvenida =
+        g_file_test("/usr/share/icons/fondo-bienvenida.png", G_FILE_TEST_EXISTS)
+            ? "/usr/share/icons/fondo-bienvenida.png"
+            : "branding/fondo-bienvenida.png";
+
+    /* Imagen de fondo del login de Colaborador (oficina, distinta a la
+     * de las pantallas de cliente). Mismo patron de ruta instalada vs
+     * ruta del repo. */
+    const char *ruta_fondo_colaborador =
+        g_file_test("/usr/share/icons/fondo-colaborador.png", G_FILE_TEST_EXISTS)
+            ? "/usr/share/icons/fondo-colaborador.png"
+            : "branding/fondo-colaborador.png";
+
     gchar *css = g_strdup_printf(
         /* Fondo general de la app */
         "window { background-color: %s; }"
@@ -337,6 +352,83 @@ static void aplicar_estilos(void) {
         "}"
         ".encabezado-banner label { color: #FFFFFF; }"
         ".subtitulo-banner { color: #D9F2E0; }"
+        ".encabezado-seccion { color: #D9F2E0; letter-spacing: 1px; }"
+
+        /* Fondo dinamico para las pantallas de bienvenida: selector inicial,
+         * login/registro de clientes y menu principal. Un solo color de marca
+         * (no cambia con modo claro/oscuro, igual que el banner). */
+        ".pawos-fondo-dinamico {"
+        "  background-image: linear-gradient(rgba(10,48,23,0.72), rgba(12,53,25,0.72)), url(\"%s\");"
+        "  background-size: cover;"
+        "  background-position: center;"
+        "  background-repeat: no-repeat;"
+        "}"
+        ".pawos-fondo-dinamico label {"
+        "  color: #FFFFFF;"
+        "  text-shadow: 0 2px 6px rgba(0,0,0,0.6);"
+        "}"
+        ".pawos-fondo-dinamico entry, .pawos-fondo-dinamico textview,"
+        ".pawos-fondo-dinamico textview text {"
+        "  background-color: rgba(255,255,255,0.94);"
+        "  color: #14301D;"
+        "}"
+        ".pawos-fondo-colaborador {"
+        "  background-image: linear-gradient(rgba(10,46,22,0.8), rgba(12,51,24,0.8)), url(\"%s\");"
+        "  background-size: cover;"
+        "  background-position: center;"
+        "  background-repeat: no-repeat;"
+        "}"
+        ".pawos-fondo-colaborador label {"
+        "  color: #FFFFFF;"
+        "  text-shadow: 0 2px 6px rgba(0,0,0,0.6);"
+        "}"
+        ".pawos-fondo-colaborador entry, .pawos-fondo-colaborador textview,"
+        ".pawos-fondo-colaborador textview text {"
+        "  background-color: rgba(255,255,255,0.94);"
+        "  color: #14301D;"
+        "}"
+        ".pawos-fondo-transparente {"
+        "  background-color: transparent;"
+        "  background-image: none;"
+        "}"
+        /* Botones de la barra de titulo propia (maximizar/restaurar,
+         * cerrar): planos, sin el fondo solido de los botones normales. */
+        "headerbar button, .titlebar button, decoration button {"
+        "  background-color: transparent;"
+        "  background-image: none;"
+        "  border: none;"
+        "  box-shadow: none;"
+        "  padding: 2px;"
+        "  min-width: 22px;"
+        "  min-height: 22px;"
+        "}"
+        ".pawos-boton-cerrar-barra {"
+        "  font-size: 13px;"
+        "  padding: 0px 6px;"
+        "}"
+        "headerbar button:hover, .titlebar button:hover, decoration button:hover {"
+        "  background-color: rgba(255,255,255,0.15);"
+        "}"
+        /* El boton de cerrar que GTK agrega solo trae su propia clase
+         * interna (.titlebutton) que le gana en prioridad a la regla
+         * de arriba -- se apunta directo a ella para quitarle el
+         * cuadro de fondo tambien. */
+        "headerbar .titlebutton, headerbar button.titlebutton {"
+        "  background-color: transparent;"
+        "  background-image: none;"
+        "  border: none;"
+        "  box-shadow: none;"
+        "}"
+        "headerbar .titlebutton:hover, headerbar button.titlebutton:hover {"
+        "  background-color: rgba(255,255,255,0.15);"
+        "}"
+        ".pawos-panel-inferior {"
+        "  background-color: rgba(8,38,18,0.6);"
+        "  padding: 16px 20px;"
+        "  border-radius: 18px 18px 0 0;"
+        "  box-shadow: 0 -6px 16px rgba(0,0,0,0.3);"
+        "}"
+        ".pawos-panel-inferior label { color: #FFFFFF; }"
 
         /* Insignia (pill) de rol */
         ".badge {"
@@ -435,10 +527,50 @@ static void aplicar_estilos(void) {
         "}"
         "placessidebar row, .sidebar row {"
         "  color: %s;"
+        "}"
+
+        /* Barra lateral de navegacion del menu principal (estilo tipo
+         * panel de administracion): franja solida en el color de marca
+         * en vez de la imagen de fondo, para que se vea limpia junto
+         * al panel de contenido claro. */
+        ".pawos-sidebar {"
+        "  background-image: linear-gradient(180deg, #23924B 0%%, #12451F 100%%);"
+        "  padding: 22px 16px;"
+        "}"
+        ".pawos-sidebar label { color: #FFFFFF; }"
+        ".pawos-sidebar-titulo { color: #FFFFFF; }"
+        ".pawos-nav-item {"
+        "  background-color: transparent;"
+        "  background-image: none;"
+        "  color: #FFFFFF;"
+        "  border: none;"
+        "  box-shadow: none;"
+        "  border-radius: 8px;"
+        "  font-weight: normal;"
+        "  padding: 8px 10px;"
+        "}"
+        ".pawos-nav-item:hover {"
+        "  background-color: rgba(255,255,255,0.16);"
+        "}"
+        ".pawos-contenido {"
+        "  background-color: %s;"
+        "}"
+        ".pawos-contenido label { color: %s; }"
+        ".pawos-contenido-topbar {"
+        "  border-bottom: 1px solid %s;"
+        "  padding-bottom: 14px;"
+        "}"
+        ".pawos-tarjeta {"
+        "  background-color: %s;"
+        "  border-radius: 14px;"
+        "  padding: 22px;"
+        "  box-shadow: 0 2px 8px rgba(0,0,0,0.12);"
         "}",
         fondo_ventana, color_texto,
         fondo_ventana, color_texto,
         boton_bg, boton_fg,
+        ruta_fondo_bienvenida,
+        ruta_fondo_colaborador,
         boton_bg, boton_fg, boton_borde, boton_bg_hover,
         deshabilitado_bg, deshabilitado_fg,
         fondo_tabla, texto_tabla,
@@ -446,7 +578,8 @@ static void aplicar_estilos(void) {
         fondo_dialogo,
         fondo_dialogo, color_texto, boton_borde,
         fondo_dialogo, color_texto,
-        fondo_dialogo, color_texto, color_texto);
+        fondo_dialogo, color_texto, color_texto,
+        fondo_dialogo, color_texto, boton_borde, fondo_dialogo);
 
     if (g_proveedor_estilos) {
         gtk_style_context_remove_provider_for_screen(
@@ -707,18 +840,54 @@ static void on_refrescar_mascotas_clicked(GtkButton *boton, gpointer datos) {
     cargar_mascotas((ContextoMascotas *)datos);
 }
 
-static void abrir_pantalla_mascotas(GtkWidget *padre, Rol rol) {
+static void mostrar_en_panel(GtkWidget *contenedor, GtkWidget *nuevo) {
+    GList *hijos = gtk_container_get_children(GTK_CONTAINER(contenedor));
+    for (GList *l = hijos; l != NULL; l = l->next) {
+        gtk_widget_destroy(GTK_WIDGET(l->data));
+    }
+    g_list_free(hijos);
+    gtk_box_pack_start(GTK_BOX(contenedor), nuevo, TRUE, TRUE, 0);
+    gtk_widget_show_all(nuevo);
+}
+
+static GtkWidget *construir_tarjeta_bienvenida(void) {
+    GtkWidget *tarjeta_bienvenida = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_style_context_add_class(gtk_widget_get_style_context(tarjeta_bienvenida), "pawos-tarjeta");
+
+    GtkWidget *titulo = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(titulo), "<span size='x-large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
+    gtk_widget_set_halign(titulo, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(tarjeta_bienvenida), titulo, FALSE, FALSE, 0);
+
+    GtkWidget *lbl_ayuda = gtk_label_new("Selecciona un modulo del menu lateral para comenzar.");
+    gtk_widget_set_halign(lbl_ayuda, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(tarjeta_bienvenida), lbl_ayuda, FALSE, FALSE, 0);
+
+    return tarjeta_bienvenida;
+}
+
+static void on_cerrar_panel_clicked(GtkButton *boton, gpointer datos) {
+    (void)boton;
+    GtkWidget *area_dinamica = GTK_WIDGET(datos);
+    mostrar_en_panel(area_dinamica, construir_tarjeta_bienvenida());
+}
+
+/* "Gestion de Mascotas" ahora se dibuja directamente en el panel de
+ * contenido del menu principal (area_dinamica), en vez de abrir una
+ * ventana nueva encima. ctx->ventana sigue existiendo, pero ahora
+ * apunta a la ventana principal -- solo se usa como padre de los
+ * sub-dialogos de Registrar/Cambiar estado/Eliminar (esas tres
+ * funciones no cambiaron ni una linea). */
+static void abrir_pantalla_mascotas(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {
     ContextoMascotas *ctx = g_malloc0(sizeof(ContextoMascotas));
     ctx->rol = rol;
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Gestion de Mascotas");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 760, 480);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
+    ctx->ventana = ventana_principal;
 
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+    /* El contexto se libera solo cuando este panel se reemplaza por
+     * otro (mostrar_en_panel destruye "caja"), sin depender de que se
+     * cierre ninguna ventana. */
+    g_object_set_data_full(G_OBJECT(caja), "pawos-contexto-mascotas", ctx, g_free);
 
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Gestion de Mascotas</span>");
@@ -775,11 +944,10 @@ static void abrir_pantalla_mascotas(GtkWidget *padre, Rol rol) {
     g_signal_connect(btn_registrar, "clicked", G_CALLBACK(on_registrar_clicked), ctx);
     g_signal_connect(btn_estado, "clicked", G_CALLBACK(on_cambiar_estado_clicked), ctx);
     g_signal_connect(btn_eliminar, "clicked", G_CALLBACK(on_eliminar_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
     cargar_mascotas(ctx);
-    mostrar_con_fundido(ctx->ventana);
+    mostrar_en_panel(area_dinamica, caja);
 }
 
 /* =================================================================
@@ -962,19 +1130,14 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     gtk_widget_destroy(dialogo);
 }
 
-static void abrir_pantalla_vacunas(GtkWidget *padre, Rol rol) {
+static void abrir_pantalla_vacunas(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {
     ContextoVacunas *ctx = g_malloc0(sizeof(ContextoVacunas));
     ctx->rol = rol;
     ctx->solo_pendientes = FALSE;
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Agenda de Vacunas");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 720, 460);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
+    ctx->ventana = ventana_principal;
 
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+    g_object_set_data_full(G_OBJECT(caja), "pawos-contexto-vacunas", ctx, g_free);
 
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Agenda de Vacunas</span>");
@@ -1023,11 +1186,10 @@ static void abrir_pantalla_vacunas(GtkWidget *padre, Rol rol) {
     g_signal_connect(btn_todas, "clicked", G_CALLBACK(on_ver_todas_vacunas_clicked), ctx);
     g_signal_connect(btn_pendientes, "clicked", G_CALLBACK(on_ver_pendientes_vacunas_clicked), ctx);
     g_signal_connect(btn_registrar, "clicked", G_CALLBACK(on_registrar_vacuna_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
     cargar_vacunas(ctx);
-    mostrar_con_fundido(ctx->ventana);
+    mostrar_en_panel(area_dinamica, caja);
 }
 
 /* =================================================================
@@ -1135,18 +1297,13 @@ static void on_registrar_adopcion_clicked(GtkButton *boton, gpointer datos) {
     gtk_widget_destroy(dialogo);
 }
 
-static void abrir_pantalla_adopciones(GtkWidget *padre, Rol rol) {
+static void abrir_pantalla_adopciones(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {
     ContextoAdopciones *ctx = g_malloc0(sizeof(ContextoAdopciones));
     ctx->rol = rol;
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Control de Adopciones");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 720, 460);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
+    ctx->ventana = ventana_principal;
 
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+    g_object_set_data_full(G_OBJECT(caja), "pawos-contexto-adopciones", ctx, g_free);
 
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Control de Adopciones</span>");
@@ -1185,11 +1342,10 @@ static void abrir_pantalla_adopciones(GtkWidget *padre, Rol rol) {
 
     g_signal_connect(btn_refrescar, "clicked", G_CALLBACK(on_refrescar_adopciones_clicked), ctx);
     g_signal_connect(btn_registrar, "clicked", G_CALLBACK(on_registrar_adopcion_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
     cargar_adopciones(ctx);
-    mostrar_con_fundido(ctx->ventana);
+    mostrar_en_panel(area_dinamica, caja);
 }
 
 /* =================================================================
@@ -1295,19 +1451,14 @@ static void on_registrar_donante_clicked(GtkButton *boton, gpointer datos) {
     gtk_widget_destroy(dialogo);
 }
 
-static void abrir_pantalla_donantes(GtkWidget *padre, Rol rol) {
+static void abrir_pantalla_donantes(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {
     (void)rol; /* ya se filtro el acceso antes de llamar a esta funcion */
 
     ContextoDonantes *ctx = g_malloc0(sizeof(ContextoDonantes));
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Base de Donantes");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 720, 460);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
+    ctx->ventana = ventana_principal;
 
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+    g_object_set_data_full(G_OBJECT(caja), "pawos-contexto-donantes", ctx, g_free);
 
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Base de Donantes</span>");
@@ -1350,11 +1501,10 @@ static void abrir_pantalla_donantes(GtkWidget *padre, Rol rol) {
 
     g_signal_connect(btn_refrescar, "clicked", G_CALLBACK(on_refrescar_donantes_clicked), ctx);
     g_signal_connect(btn_registrar, "clicked", G_CALLBACK(on_registrar_donante_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
     cargar_donantes(ctx);
-    mostrar_con_fundido(ctx->ventana);
+    mostrar_en_panel(area_dinamica, caja);
 }
 
 /* =================================================================
@@ -1712,19 +1862,14 @@ static void on_generar_reporte_categoria_clicked(GtkButton *boton, gpointer dato
     agregar_entrada_historial(ctx, d->nombre_tipo);
 }
 
-static void abrir_pantalla_reportes(GtkWidget *padre, Rol rol) {
+static void abrir_pantalla_reportes(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {
     (void)rol; /* ya se filtro el acceso antes de llamar a esta funcion */
 
     ContextoReportes *ctx = g_malloc0(sizeof(ContextoReportes));
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Reportes");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 640, 480);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
+    ctx->ventana = ventana_principal;
 
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+    g_object_set_data_full(G_OBJECT(caja), "pawos-contexto-reportes", ctx, g_free);
 
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Reportes</span>");
@@ -1818,10 +1963,9 @@ static void abrir_pantalla_reportes(GtkWidget *padre, Rol rol) {
 
     g_signal_connect(btn_generar, "clicked", G_CALLBACK(on_generar_reporte_clicked), ctx);
     g_signal_connect(ctx->btn_guardar, "clicked", G_CALLBACK(on_guardar_como_reporte_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
-    mostrar_con_fundido(ctx->ventana);
+    mostrar_en_panel(area_dinamica, caja);
 }
 
 /* =================================================================
@@ -1933,17 +2077,12 @@ static void on_terminar_proceso_clicked(GtkButton *boton, gpointer datos) {
     gtk_widget_destroy(dialogo);
 }
 
-static void abrir_pantalla_procesos(GtkWidget *padre) {
+static void abrir_pantalla_procesos(GtkWidget *area_dinamica, GtkWidget *ventana_principal) {
     ContextoProcesos *ctx = g_malloc0(sizeof(ContextoProcesos));
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Administracion de Procesos");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 700, 460);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
+    ctx->ventana = ventana_principal;
 
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+    g_object_set_data_full(G_OBJECT(caja), "pawos-contexto-procesos", ctx, g_free);
 
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Administracion de Procesos</span>");
@@ -1984,11 +2123,10 @@ static void abrir_pantalla_procesos(GtkWidget *padre) {
     g_signal_connect(btn_refrescar, "clicked", G_CALLBACK(on_refrescar_procesos_clicked), ctx);
     g_signal_connect(btn_crear, "clicked", G_CALLBACK(on_crear_proceso_clicked), ctx);
     g_signal_connect(btn_terminar, "clicked", G_CALLBACK(on_terminar_proceso_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
     cargar_procesos(ctx);
-    mostrar_con_fundido(ctx->ventana);
+    mostrar_en_panel(area_dinamica, caja);
 }
 
 /* =================================================================
@@ -2122,17 +2260,12 @@ static void on_destruir_proceso_demo_clicked(GtkButton *boton, gpointer datos) {
     actualizar_estadisticas_memoria(ctx);
 }
 
-static void abrir_pantalla_memoria(GtkWidget *padre) {
+static void abrir_pantalla_memoria(GtkWidget *area_dinamica, GtkWidget *ventana_principal) {
     ContextoMemoria *ctx = g_malloc0(sizeof(ContextoMemoria));
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Administracion de Memoria");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 520, 420);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 16);
+    ctx->ventana = ventana_principal;
 
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+    g_object_set_data_full(G_OBJECT(caja), "pawos-contexto-memoria", ctx, g_free);
 
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Administracion de Memoria</span>");
@@ -2190,11 +2323,10 @@ static void abrir_pantalla_memoria(GtkWidget *padre) {
     g_signal_connect(btn_asignar, "clicked", G_CALLBACK(on_asignar_memoria_clicked), ctx);
     g_signal_connect(btn_probar, "clicked", G_CALLBACK(on_probar_lectura_escritura_clicked), ctx);
     g_signal_connect(btn_destruir, "clicked", G_CALLBACK(on_destruir_proceso_demo_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
     actualizar_estadisticas_memoria(ctx);
-    mostrar_con_fundido(ctx->ventana);
+    mostrar_en_panel(area_dinamica, caja);
 }
 
 /* =================================================================
@@ -2726,17 +2858,18 @@ static void liberar_contexto_respaldo(GtkWidget *widget, gpointer datos) {
     g_free(ctx);
 }
 
-static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
+static void liberar_contexto_respaldo_gdestroy(gpointer datos) {
+    ContextoRespaldo *ctx = (ContextoRespaldo *)datos;
+    if (ctx->vivo) *ctx->vivo = FALSE;
+    g_free(ctx);
+}
+
+static void abrir_pantalla_respaldo(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {
     ContextoRespaldo *ctx = g_malloc0(sizeof(ContextoRespaldo));
     ctx->rol = rol;
     ctx->vivo = g_new(gboolean, 1);
     *ctx->vivo = TRUE;
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Respaldo en la Nube");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 580, 700);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 16);
+    ctx->ventana = ventana_principal;
 
     /* caja_raiz separa el contenido (que puede crecer, por eso va
      * dentro de un GtkScrolledWindow) de la fila de botones de abajo
@@ -2747,7 +2880,7 @@ static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
      * lo suficiente para que los botones de abajo quedaran fuera del
      * area visible en ventanas mas chicas. */
     GtkWidget *caja_raiz = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja_raiz);
+    g_object_set_data_full(G_OBJECT(caja_raiz), "pawos-contexto-respaldo", ctx, liberar_contexto_respaldo_gdestroy);
 
     GtkWidget *scroll_principal = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_principal),
@@ -2905,13 +3038,12 @@ static void abrir_pantalla_respaldo(GtkWidget *padre, Rol rol) {
     g_signal_connect(ctx->radio_auto, "toggled", G_CALLBACK(on_radio_modo_respaldo_toggled), ctx);
     g_signal_connect(btn_guardar_config, "clicked", G_CALLBACK(on_guardar_config_respaldo_clicked), ctx);
     g_signal_connect(ctx->btn_restaurar, "clicked", G_CALLBACK(on_restaurar_respaldo_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto_respaldo), ctx);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
     actualizar_estado_respaldo(ctx);
     actualizar_ui_modo_respaldo(ctx);
     cargar_historial_respaldos(ctx);
-    mostrar_con_fundido(ctx->ventana);
+    mostrar_en_panel(area_dinamica, caja_raiz);
 }
 
 /* =================================================================
@@ -3089,19 +3221,14 @@ static void on_registrar_alerta_prueba_clicked(GtkButton *boton, gpointer datos)
     gtk_widget_destroy(dialogo);
 }
 
-static void abrir_pantalla_alertas(GtkWidget *padre, Rol rol) {
+static void abrir_pantalla_alertas(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {
     ContextoAlertas *ctx = g_malloc0(sizeof(ContextoAlertas));
     ctx->rol = rol;
     ctx->solo_pendientes = TRUE;
-
-    ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Alertas de Sensores");
-    gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 760, 480);
-    gtk_window_set_transient_for(GTK_WINDOW(ctx->ventana), GTK_WINDOW(padre));
-    gtk_container_set_border_width(GTK_CONTAINER(ctx->ventana), 14);
+    ctx->ventana = ventana_principal;
 
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ctx->ventana), caja);
+    g_object_set_data_full(G_OBJECT(caja), "pawos-contexto-alertas", ctx, g_free);
 
     GtkWidget *titulo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(titulo), "<span size='large' weight='bold'>Alertas de Sensores (ESP32)</span>");
@@ -3162,11 +3289,10 @@ static void abrir_pantalla_alertas(GtkWidget *padre, Rol rol) {
     g_signal_connect(btn_todas, "clicked", G_CALLBACK(on_ver_todas_alertas_clicked), ctx);
     g_signal_connect(btn_atendida, "clicked", G_CALLBACK(on_marcar_atendida_clicked), ctx);
     g_signal_connect(btn_prueba, "clicked", G_CALLBACK(on_registrar_alerta_prueba_clicked), ctx);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ctx->ventana);
-    g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(liberar_contexto), ctx);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
     cargar_alertas(ctx);
-    mostrar_con_fundido(ctx->ventana);
+    mostrar_en_panel(area_dinamica, caja);
 }
 
 /* =================================================================
@@ -3175,6 +3301,7 @@ static void abrir_pantalla_alertas(GtkWidget *padre, Rol rol) {
 
 typedef struct {
     GtkWidget  *ventana_principal;
+    GtkWidget  *area_dinamica;
     Rol         rol;
     const char *usuario;
 } DatosBotonModulo;
@@ -3182,19 +3309,19 @@ typedef struct {
 static void on_mascotas_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     DatosBotonModulo *d = (DatosBotonModulo *)datos;
-    abrir_pantalla_mascotas(d->ventana_principal, d->rol);
+    abrir_pantalla_mascotas(d->area_dinamica, d->ventana_principal, d->rol);
 }
 
 static void on_vacunas_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     DatosBotonModulo *d = (DatosBotonModulo *)datos;
-    abrir_pantalla_vacunas(d->ventana_principal, d->rol);
+    abrir_pantalla_vacunas(d->area_dinamica, d->ventana_principal, d->rol);
 }
 
 static void on_adopciones_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     DatosBotonModulo *d = (DatosBotonModulo *)datos;
-    abrir_pantalla_adopciones(d->ventana_principal, d->rol);
+    abrir_pantalla_adopciones(d->area_dinamica, d->ventana_principal, d->rol);
 }
 
 /* Donantes: informacion sensible -> solo Admin y Veterinario, no Voluntario
@@ -3207,7 +3334,7 @@ static void on_donantes_clicked(GtkButton *boton, gpointer datos) {
             "Acceso restringido: este modulo requiere rol Admin o Veterinario.", TRUE);
         return;
     }
-    abrir_pantalla_donantes(d->ventana_principal, d->rol);
+    abrir_pantalla_donantes(d->area_dinamica, d->ventana_principal, d->rol);
 }
 
 /* Reportes: igual que pantalla_reportes() en pantallas.c */
@@ -3219,7 +3346,7 @@ static void on_reportes_clicked(GtkButton *boton, gpointer datos) {
             "Acceso restringido: este modulo requiere rol Admin o Veterinario.", TRUE);
         return;
     }
-    abrir_pantalla_reportes(d->ventana_principal, d->rol);
+    abrir_pantalla_reportes(d->area_dinamica, d->ventana_principal, d->rol);
 }
 
 /* Procesos: solo Administrador, igual que pantalla_procesos() */
@@ -3231,7 +3358,7 @@ static void on_procesos_clicked(GtkButton *boton, gpointer datos) {
             "Acceso denegado: esta seccion es solo para el Administrador.", TRUE);
         return;
     }
-    abrir_pantalla_procesos(d->ventana_principal);
+    abrir_pantalla_procesos(d->area_dinamica, d->ventana_principal);
 }
 
 /* Memoria: solo Administrador, igual que pantalla_memoria() */
@@ -3243,7 +3370,7 @@ static void on_memoria_clicked(GtkButton *boton, gpointer datos) {
             "Acceso denegado: esta seccion es solo para el Administrador.", TRUE);
         return;
     }
-    abrir_pantalla_memoria(d->ventana_principal);
+    abrir_pantalla_memoria(d->area_dinamica, d->ventana_principal);
 }
 
 /* Respaldo en la Nube: la ventana se abre para cualquier rol (ver el
@@ -3252,7 +3379,7 @@ static void on_memoria_clicked(GtkButton *boton, gpointer datos) {
 static void on_respaldo_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     DatosBotonModulo *d = (DatosBotonModulo *)datos;
-    abrir_pantalla_respaldo(d->ventana_principal, d->rol);
+    abrir_pantalla_respaldo(d->area_dinamica, d->ventana_principal, d->rol);
 }
 
 /* Alertas de Sensores: la ventana se abre para cualquier rol (ver
@@ -3262,7 +3389,7 @@ static void on_respaldo_clicked(GtkButton *boton, gpointer datos) {
 static void on_alertas_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     DatosBotonModulo *d = (DatosBotonModulo *)datos;
-    abrir_pantalla_alertas(d->ventana_principal, d->rol);
+    abrir_pantalla_alertas(d->area_dinamica, d->ventana_principal, d->rol);
 }
 
 /* Clasifica cada linea del changelog con un icono, al estilo de las
@@ -3741,29 +3868,17 @@ static void on_agregar_colaborador_clicked(GtkButton *boton, gpointer datos) {
     mostrar_formulario_nuevo_colaborador((ContextoColaboradores *)datos);
 }
 
-static void abrir_pantalla_administrar_colaboradores(GtkWindow *padre, Rol rol) {
+static void abrir_pantalla_administrar_colaboradores(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {
     if (rol != ROL_ADMIN) {
-        mostrar_mensaje(padre, "Requiere rol Administrador.", TRUE);
+        mostrar_mensaje(GTK_WINDOW(ventana_principal), "Requiere rol Administrador.", TRUE);
         return;
     }
 
     ContextoColaboradores *ctx = g_malloc0(sizeof(ContextoColaboradores));
 
-    GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    ctx->ventana = ventana;
-    gtk_window_set_title(GTK_WINDOW(ventana), "Administrar Colaboradores");
-    gtk_window_set_default_size(GTK_WINDOW(ventana), 420, 420);
-    gtk_window_set_transient_for(GTK_WINDOW(ventana), padre);
-    gtk_window_set_position(GTK_WINDOW(ventana), GTK_WIN_POS_CENTER_ON_PARENT);
-    gtk_container_set_border_width(GTK_CONTAINER(ventana), 14);
-    /* g_signal_connect_swapped (no g_signal_connect normal): asi GTK
-     * llama g_free(ctx) directo. Con g_signal_connect normal el
-     * callback recibe (ventana, ctx) y terminaria intentando liberar
-     * la ventana misma con g_free(), lo cual corrompe la memoria. */
-    g_signal_connect_swapped(ventana, "destroy", G_CALLBACK(g_free), ctx);
-
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(ventana), caja);
+    ctx->ventana = ventana_principal;
+    g_object_set_data_full(G_OBJECT(caja), "pawos-contexto-colaboradores", ctx, g_free);
 
     ctx->store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
     ctx->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->store));
@@ -3785,15 +3900,15 @@ static void abrir_pantalla_administrar_colaboradores(GtkWindow *padre, Rol rol) 
 
     GtkWidget *btn_cerrar = gtk_button_new_with_label("Cerrar");
     gtk_box_pack_start(GTK_BOX(caja), btn_cerrar, FALSE, FALSE, 0);
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
 
-    mostrar_con_fundido(ventana);
+    mostrar_en_panel(area_dinamica, caja);
 }
 
 static void on_administrar_colaboradores_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     DatosBotonModulo *d = (DatosBotonModulo *)datos;
-    abrir_pantalla_administrar_colaboradores(GTK_WINDOW(d->ventana_principal), d->rol);
+    abrir_pantalla_administrar_colaboradores(d->area_dinamica, d->ventana_principal, d->rol);
 }
 
 /* Dice si el rol dado tiene acceso al modulo "indice" (mismo orden
@@ -3872,15 +3987,8 @@ static void on_administrar_clientes_clicked(GtkButton *boton, gpointer datos) {
         return;
     }
 
-    GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(ventana), "Administrar Clientes");
-    gtk_window_set_default_size(GTK_WINDOW(ventana), 520, 400);
-    gtk_window_set_transient_for(GTK_WINDOW(ventana), padre);
-    gtk_window_set_position(GTK_WINDOW(ventana), GTK_WIN_POS_CENTER_ON_PARENT);
-
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_container_set_border_width(GTK_CONTAINER(caja), 12);
-    gtk_container_add(GTK_CONTAINER(ventana), caja);
 
     GtkListStore *store = gtk_list_store_new(4, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
     Cliente *lista = NULL;
@@ -3914,10 +4022,10 @@ static void on_administrar_clientes_clicked(GtkButton *boton, gpointer datos) {
     gtk_box_pack_start(GTK_BOX(caja), btn_cambiar, FALSE, FALSE, 0);
 
     GtkWidget *btn_cerrar = gtk_button_new_with_label("Cerrar");
-    g_signal_connect_swapped(btn_cerrar, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
+    g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), d->area_dinamica);
     gtk_box_pack_start(GTK_BOX(caja), btn_cerrar, FALSE, FALSE, 0);
 
-    mostrar_con_fundido(ventana);
+    mostrar_en_panel(d->area_dinamica, caja);
 }
 
 /* Pantalla de Administrador para guardar las credenciales de correo
@@ -4007,63 +4115,48 @@ static void on_configurar_notificaciones_clicked(GtkButton *boton, gpointer dato
     gtk_widget_destroy(dialogo);
 }
 
+static GtkWidget *agregar_barra_titulo_con_maximizar(GtkWindow *ventana, const char *titulo);
+
 static void construir_ventana_principal(Rol rol, const char *usuario) {
     GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ventana), "PawOS Refugio");
-    gtk_window_set_default_size(GTK_WINDOW(ventana), 580, 660);
+    gtk_window_set_default_size(GTK_WINDOW(ventana), 900, 700);
+    gtk_window_set_resizable(GTK_WINDOW(ventana), TRUE);
+    /* Sin esto el gestor de ventanas puede dejar deshabilitada la
+     * opcion de maximizar para esta ventana (mismo problema que ya se
+     * habia resuelto antes en el dialogo selector de entrada). */
+    gtk_window_set_type_hint(GTK_WINDOW(ventana), GDK_WINDOW_TYPE_HINT_NORMAL);
     gtk_window_set_position(GTK_WINDOW(ventana), GTK_WIN_POS_CENTER);
-    gtk_container_set_border_width(GTK_CONTAINER(ventana), 22);
+    gtk_container_set_border_width(GTK_CONTAINER(ventana), 0);
     g_signal_connect(ventana, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
-    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    gtk_container_add(GTK_CONTAINER(ventana), caja);
+    /* Estructura tipo panel de administracion: barra lateral de
+     * navegacion a la izquierda (color de marca) + panel de contenido
+     * a la derecha (fondo claro/oscuro segun el tema), en vez de la
+     * columna unica de botones grandes. */
+    GtkWidget *caja_raiz = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_container_add(GTK_CONTAINER(ventana), caja_raiz);
+    agregar_barra_titulo_con_maximizar(GTK_WINDOW(ventana), "PawOS Refugio");
 
-    /* Banner de encabezado: titulo + insignia de rol con color propio,
-     * en vez de una simple etiqueta de texto plano. */
-    GtkWidget *banner = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_style_context_add_class(gtk_widget_get_style_context(banner), "encabezado-banner");
-    gtk_box_pack_start(GTK_BOX(caja), banner, FALSE, FALSE, 0);
+    GtkWidget *barra_lateral = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_style_context_add_class(gtk_widget_get_style_context(barra_lateral), "pawos-sidebar");
+    gtk_widget_set_size_request(barra_lateral, 260, -1);
+    gtk_box_pack_start(GTK_BOX(caja_raiz), barra_lateral, FALSE, FALSE, 0);
 
-    GtkWidget *titulo = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(titulo), "<span size='x-large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
-    gtk_widget_set_halign(titulo, GTK_ALIGN_CENTER);
-    gtk_box_pack_start(GTK_BOX(banner), titulo, FALSE, FALSE, 0);
+    GtkWidget *lbl_logo = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(lbl_logo), "<span size='large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
+    gtk_widget_set_halign(lbl_logo, GTK_ALIGN_START);
+    gtk_style_context_add_class(gtk_widget_get_style_context(lbl_logo), "pawos-sidebar-titulo");
+    gtk_box_pack_start(GTK_BOX(barra_lateral), lbl_logo, FALSE, FALSE, 0);
 
     GtkWidget *lbl_version = gtk_label_new(NULL);
     gchar *markup_version = g_strdup_printf("<span size='small'>v%s</span>", PAWOS_VERSION);
     gtk_label_set_markup(GTK_LABEL(lbl_version), markup_version);
     g_free(markup_version);
-    gtk_widget_set_halign(lbl_version, GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(lbl_version, GTK_ALIGN_START);
+    gtk_widget_set_margin_bottom(lbl_version, 14);
     gtk_style_context_add_class(gtk_widget_get_style_context(lbl_version), "subtitulo-banner");
-    gtk_box_pack_start(GTK_BOX(banner), lbl_version, FALSE, FALSE, 0);
-
-    GtkWidget *fila_usuario = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_widget_set_halign(fila_usuario, GTK_ALIGN_CENTER);
-    gtk_box_pack_start(GTK_BOX(banner), fila_usuario, FALSE, FALSE, 0);
-
-    GtkWidget *lbl_bienvenida = gtk_label_new(NULL);
-    gchar *texto_bienvenida = g_strdup_printf("Bienvenido, %s", usuario);
-    gtk_label_set_text(GTK_LABEL(lbl_bienvenida), texto_bienvenida);
-    g_free(texto_bienvenida);
-    gtk_style_context_add_class(gtk_widget_get_style_context(lbl_bienvenida), "subtitulo-banner");
-    gtk_box_pack_start(GTK_BOX(fila_usuario), lbl_bienvenida, FALSE, FALSE, 0);
-
-    GtkWidget *badge_rol = gtk_label_new(auth_rol_nombre(rol));
-    gtk_style_context_add_class(gtk_widget_get_style_context(badge_rol), "badge");
-    const char *clase_badge =
-        (rol == ROL_ADMIN)         ? "badge-admin" :
-        (rol == ROL_VETERINARIO)   ? "badge-veterinario" :
-        (rol == ROL_RESCATISTA)    ? "badge-rescatista" :
-        (rol == ROL_RECEPCIONISTA) ? "badge-recepcionista" : "badge-voluntario";
-    gtk_style_context_add_class(gtk_widget_get_style_context(badge_rol), clase_badge);
-    gtk_box_pack_start(GTK_BOX(fila_usuario), badge_rol, FALSE, FALSE, 0);
-
-    GtkWidget *cuadricula = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(cuadricula), 12);
-    gtk_grid_set_column_spacing(GTK_GRID(cuadricula), 12);
-    gtk_grid_set_column_homogeneous(GTK_GRID(cuadricula), TRUE);
-    gtk_widget_set_vexpand(cuadricula, TRUE);
-    gtk_box_pack_start(GTK_BOX(caja), cuadricula, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(barra_lateral), lbl_version, FALSE, FALSE, 0);
 
     const char *nombres_modulos[] = {
         "Gestion de Mascotas",
@@ -4094,14 +4187,15 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         "\xF0\x9F\x93\xA7", /* envelope */
         "\xF0\x9F\x9B\x82", /* briefcase */
     };
-    /* Categoria por modulo (solo cosmetica, define el color del boton):
-     * refugio = atencion directa al animal, gestion = administrativo,
-     * sistema = infraestructura del S.O. */
+    /* Categoria por modulo: ya no se usa para el color del boton (todos
+     * los items de la barra lateral usan el mismo estilo), se deja
+     * declarada por si se retoma mas adelante. */
     const char *categorias_modulos[] = {
         "cat-refugio", "cat-refugio", "cat-refugio", "cat-gestion",
         "cat-gestion", "cat-sistema", "cat-sistema", "cat-gestion", "cat-refugio",
         "cat-gestion", "cat-gestion", "cat-gestion",
     };
+    (void)categorias_modulos;
     GCallback manejadores[] = {
         G_CALLBACK(on_mascotas_clicked),
         G_CALLBACK(on_vacunas_clicked),
@@ -4124,17 +4218,45 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     datos_botones->usuario = usuario;
     g_signal_connect(ventana, "destroy", G_CALLBACK(liberar_contexto), datos_botones);
 
-    for (int i = 0; i < total_modulos; i++) {
+    /* Orden VISUAL de los modulos, agrupados por seccion. Este arreglo
+     * solo dice en que orden se DIBUJAN los items -- el indice real de
+     * cada modulo (el que usan modulo_permitido() y manejadores[]) es
+     * siempre el original, sin cambios. Asi se agrupa la barra lateral
+     * sin tocar ni un permiso ni una conexion de boton. */
+    const int orden_visual[] = { 0, 1, 2, 8, 3, 4, 7, 9, 10, 11, 5, 6 };
+    const char *titulos_seccion[] = {
+        "ATENCION AL REFUGIO", NULL, NULL, NULL,
+        "GESTION Y ADMINISTRACION", NULL, NULL, NULL, NULL, NULL,
+        "SISTEMA", NULL,
+    };
+
+    gboolean primera_seccion = TRUE;
+    for (int j = 0; j < total_modulos; j++) {
+        int i = orden_visual[j];
+
+        if (titulos_seccion[j]) {
+            GtkWidget *encabezado = gtk_label_new(NULL);
+            gchar *marcado = g_strdup_printf("<span weight='bold' size='small'>%s</span>", titulos_seccion[j]);
+            gtk_label_set_markup(GTK_LABEL(encabezado), marcado);
+            g_free(marcado);
+            gtk_style_context_add_class(gtk_widget_get_style_context(encabezado), "encabezado-seccion");
+            gtk_widget_set_halign(encabezado, GTK_ALIGN_START);
+            gtk_widget_set_margin_top(encabezado, primera_seccion ? 4 : 16);
+            gtk_widget_set_margin_bottom(encabezado, 4);
+            gtk_box_pack_start(GTK_BOX(barra_lateral), encabezado, FALSE, FALSE, 0);
+            primera_seccion = FALSE;
+        }
+
         gchar *etiqueta = g_strdup_printf("%s  %s", iconos_modulos[i], nombres_modulos[i]);
         GtkWidget *boton = gtk_button_new_with_label(etiqueta);
         g_free(etiqueta);
-        gtk_widget_set_size_request(boton, 250, 58);
-        gtk_style_context_add_class(gtk_widget_get_style_context(boton), "modulo");
-        gtk_style_context_add_class(gtk_widget_get_style_context(boton), categorias_modulos[i]);
-        gtk_grid_attach(GTK_GRID(cuadricula), boton, i % 2, i / 2, 1, 1);
+        gtk_widget_set_size_request(boton, -1, 40);
+        gtk_widget_set_halign(gtk_bin_get_child(GTK_BIN(boton)), GTK_ALIGN_START);
+        gtk_style_context_add_class(gtk_widget_get_style_context(boton), "pawos-nav-item");
+        gtk_box_pack_start(GTK_BOX(barra_lateral), boton, FALSE, FALSE, 0);
         g_signal_connect(boton, "clicked", manejadores[i], datos_botones);
 
-        /* Los botones siempre se muestran; solo se deshabilitan (no se
+        /* Los items siempre se muestran; solo se deshabilitan (no se
          * ocultan) cuando el rol actual no tiene acceso a ese modulo,
          * igual que ya hacian las pantallas del CLI. */
         if (!modulo_permitido(rol, i)) {
@@ -4143,26 +4265,88 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         }
     }
 
+    GtkWidget *relleno_lateral = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_vexpand(relleno_lateral, TRUE);
+    gtk_box_pack_start(GTK_BOX(barra_lateral), relleno_lateral, TRUE, TRUE, 0);
+
+    GtkWidget *encabezado_cuenta = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(encabezado_cuenta), "<span weight='bold' size='small'>CUENTA</span>");
+    gtk_style_context_add_class(gtk_widget_get_style_context(encabezado_cuenta), "encabezado-seccion");
+    gtk_widget_set_halign(encabezado_cuenta, GTK_ALIGN_START);
+    gtk_widget_set_margin_bottom(encabezado_cuenta, 4);
+    gtk_box_pack_start(GTK_BOX(barra_lateral), encabezado_cuenta, FALSE, FALSE, 0);
+
     GtkWidget *btn_actualizar = gtk_button_new_with_label("\xF0\x9F\x94\x84  Buscar Actualizaciones");
-    gtk_widget_set_size_request(btn_actualizar, 250, 46);
-    gtk_widget_set_halign(btn_actualizar, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(btn_actualizar, -1, 40);
+    gtk_widget_set_halign(gtk_bin_get_child(GTK_BIN(btn_actualizar)), GTK_ALIGN_START);
+    gtk_style_context_add_class(gtk_widget_get_style_context(btn_actualizar), "pawos-nav-item");
     gtk_widget_set_tooltip_text(btn_actualizar, "Busca la ultima version en GitHub y la instala.");
-    gtk_box_pack_start(GTK_BOX(caja), btn_actualizar, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(barra_lateral), btn_actualizar, FALSE, FALSE, 0);
     g_signal_connect(btn_actualizar, "clicked", G_CALLBACK(on_actualizar_clicked), datos_botones);
 
     GtkWidget *btn_acerca_de = gtk_button_new_with_label("Acerca de");
-    gtk_widget_set_size_request(btn_acerca_de, 250, 46);
-    gtk_widget_set_halign(btn_acerca_de, GTK_ALIGN_CENTER);
-    gtk_box_pack_start(GTK_BOX(caja), btn_acerca_de, FALSE, FALSE, 0);
+    gtk_widget_set_size_request(btn_acerca_de, -1, 40);
+    gtk_widget_set_halign(gtk_bin_get_child(GTK_BIN(btn_acerca_de)), GTK_ALIGN_START);
+    gtk_style_context_add_class(gtk_widget_get_style_context(btn_acerca_de), "pawos-nav-item");
+    gtk_box_pack_start(GTK_BOX(barra_lateral), btn_acerca_de, FALSE, FALSE, 0);
     g_signal_connect(btn_acerca_de, "clicked", G_CALLBACK(on_acerca_de_clicked), datos_botones);
 
     GtkWidget *btn_salir = gtk_button_new_with_label("Salir");
     gtk_style_context_add_class(gtk_widget_get_style_context(btn_salir), "salir");
-    gtk_widget_set_size_request(btn_salir, 250, 46);
-    gtk_widget_set_halign(btn_salir, GTK_ALIGN_CENTER);
-    gtk_box_pack_start(GTK_BOX(caja), btn_salir, FALSE, FALSE, 0);
+    gtk_widget_set_size_request(btn_salir, -1, 40);
+    gtk_widget_set_halign(gtk_bin_get_child(GTK_BIN(btn_salir)), GTK_ALIGN_START);
+    gtk_widget_set_margin_top(btn_salir, 6);
+    gtk_box_pack_start(GTK_BOX(barra_lateral), btn_salir, FALSE, FALSE, 0);
     g_signal_connect_swapped(btn_salir, "clicked", G_CALLBACK(gtk_widget_destroy), ventana);
 
+    /* Panel de contenido: fondo claro/oscuro segun el tema (igual que
+     * el resto de dialogos de la app), con una franja superior tipo
+     * "breadcrumb" y una tarjeta de bienvenida, en vez de la imagen de
+     * fondo -- se ve mas limpio junto a la barra lateral solida. */
+    GtkWidget *panel_contenido = gtk_box_new(GTK_ORIENTATION_VERTICAL, 20);
+    gtk_style_context_add_class(gtk_widget_get_style_context(panel_contenido), "pawos-contenido");
+    gtk_container_set_border_width(GTK_CONTAINER(panel_contenido), 26);
+    gtk_widget_set_hexpand(panel_contenido, TRUE);
+    gtk_box_pack_start(GTK_BOX(caja_raiz), panel_contenido, TRUE, TRUE, 0);
+
+    GtkWidget *franja_superior = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_style_context_add_class(gtk_widget_get_style_context(franja_superior), "pawos-contenido-topbar");
+    gtk_box_pack_start(GTK_BOX(panel_contenido), franja_superior, FALSE, FALSE, 0);
+
+    GtkWidget *lbl_bienvenida = gtk_label_new(NULL);
+    gchar *texto_bienvenida = g_strdup_printf("Bienvenido, %s", usuario);
+    gtk_label_set_text(GTK_LABEL(lbl_bienvenida), texto_bienvenida);
+    g_free(texto_bienvenida);
+    gtk_widget_set_halign(lbl_bienvenida, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(lbl_bienvenida, TRUE);
+    gtk_box_pack_start(GTK_BOX(franja_superior), lbl_bienvenida, TRUE, TRUE, 0);
+
+    GtkWidget *badge_rol = gtk_label_new(auth_rol_nombre(rol));
+    gtk_style_context_add_class(gtk_widget_get_style_context(badge_rol), "badge");
+    const char *clase_badge =
+        (rol == ROL_ADMIN)         ? "badge-admin" :
+        (rol == ROL_VETERINARIO)   ? "badge-veterinario" :
+        (rol == ROL_RESCATISTA)    ? "badge-rescatista" :
+        (rol == ROL_RECEPCIONISTA) ? "badge-recepcionista" : "badge-voluntario";
+    gtk_style_context_add_class(gtk_widget_get_style_context(badge_rol), clase_badge);
+    gtk_box_pack_start(GTK_BOX(franja_superior), badge_rol, FALSE, FALSE, 0);
+
+    /* area_dinamica es el contenedor que se vacia y se vuelve a llenar
+     * cada vez que se entra a un modulo o se vuelve al inicio -- por
+     * ahora solo "Gestion de Mascotas" lo usa (piloto), el resto de
+     * modulos sigue abriendo su propia ventana como antes. */
+    GtkWidget *area_dinamica = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_vexpand(area_dinamica, TRUE);
+    gtk_widget_set_hexpand(area_dinamica, TRUE);
+    gtk_box_pack_start(GTK_BOX(panel_contenido), area_dinamica, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(area_dinamica), construir_tarjeta_bienvenida(), TRUE, TRUE, 0);
+    datos_botones->area_dinamica = area_dinamica;
+
+    /* Maximizamos al final, ya con todo el contenido agregado, para que
+     * el gestor de ventanas calcule el tamaño definitivo antes de pedir
+     * el maximizado (evita que quede una ventana pequeña sin poder
+     * agrandarse). */
+    gtk_window_maximize(GTK_WINDOW(ventana));
     mostrar_con_fundido(ventana);
 }
 
@@ -4542,6 +4726,7 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
     gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
 
     GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    gtk_style_context_add_class(gtk_widget_get_style_context(area), "pawos-fondo-dinamico");
     GtkWidget *grid = gtk_grid_new();
     gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
     gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
@@ -4616,8 +4801,10 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
         gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
 
         GtkWidget *area_contenido = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+        gtk_style_context_add_class(gtk_widget_get_style_context(area_contenido), "pawos-fondo-dinamico");
         GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
         gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
+        gtk_style_context_add_class(gtk_widget_get_style_context(caja), "pawos-fondo-transparente");
         gtk_container_add(GTK_CONTAINER(area_contenido), caja);
 
         GtkWidget *titulo = gtk_label_new(NULL);
@@ -4722,6 +4909,86 @@ static gboolean mostrar_login_cliente(Cliente *cliente_out, gboolean *es_admin_o
     return FALSE;
 }
 
+/* Datos para la secuencia de bienvenida del selector inicial: primero
+ * se ve "Bienvenid@ a PawOS" centrado, y despues de un momento se
+ * desvanece para dar paso a la pregunta y los botones. */
+typedef struct {
+    GtkRevealer *bienvenida;
+    GtkRevealer *pregunta;
+    GtkRevealer *botones;
+} DatosBienvenidaSelector;
+
+/* Alterna maximizar/restaurar la ventana que se le pase, y cambia el
+ * icono del boton para que quede claro cual de las dos acciones toca.
+ * Se usa en el selector inicial y en el menu principal -- ambos abren
+ * maximizados, y el gestor de ventanas de algunas maquinas no dibuja
+ * su propio boton de restaurar, asi que la app trae el suyo. */
+/* En vez de confiar en lo que reporta GTK/el gestor de ventanas sobre
+ * si la ventana "esta maximizada" (puede llegar desincronizado, y
+ * ademas la señal window-state-event no es confiable aqui), medimos el
+ * tamaño ACTUAL de la ventana contra el tamaño del monitor donde esta
+ * en el momento del clic. Si ya ocupa (casi) toda la pantalla, la
+ * restauramos; si no, la maximizamos. No importa como llego a su
+ * tamaño actual (boton, arrastrando una esquina, lo que sea). */
+static void on_click_maximizar_restaurar(GtkButton *boton, gpointer datos) {
+    GtkWindow *ventana = GTK_WINDOW(datos);
+
+    gint ancho_ventana = 0, alto_ventana = 0;
+    gtk_window_get_size(ventana, &ancho_ventana, &alto_ventana);
+
+    GdkWindow *ventana_gdk = gtk_widget_get_window(GTK_WIDGET(ventana));
+    GdkMonitor *monitor = gdk_display_get_monitor_at_window(gdk_display_get_default(), ventana_gdk);
+    GdkRectangle area_monitor;
+    gdk_monitor_get_geometry(monitor, &area_monitor);
+
+    gboolean parece_maximizada =
+        ancho_ventana >= area_monitor.width - 4 &&
+        alto_ventana >= area_monitor.height - 4;
+
+    GtkWidget *imagen;
+    if (parece_maximizada) {
+        gtk_window_unmaximize(ventana);
+        imagen = gtk_image_new_from_icon_name("window-maximize-symbolic", GTK_ICON_SIZE_BUTTON);
+    } else {
+        gtk_window_maximize(ventana);
+        imagen = gtk_image_new_from_icon_name("window-restore-symbolic", GTK_ICON_SIZE_BUTTON);
+    }
+    gtk_button_set_image(GTK_BUTTON(boton), imagen);
+}
+
+static GtkWidget *agregar_barra_titulo_con_maximizar(GtkWindow *ventana, const char *titulo) {
+    GtkWidget *barra = gtk_header_bar_new();
+    gtk_header_bar_set_title(GTK_HEADER_BAR(barra), titulo);
+
+    GtkWidget *boton_maximizar = gtk_button_new();
+    gtk_button_set_image(GTK_BUTTON(boton_maximizar),
+        gtk_image_new_from_icon_name("window-restore-symbolic", GTK_ICON_SIZE_BUTTON));
+    gtk_widget_set_tooltip_text(boton_maximizar, "Maximizar / Restaurar");
+    g_signal_connect(boton_maximizar, "clicked", G_CALLBACK(on_click_maximizar_restaurar), ventana);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(barra), boton_maximizar);
+
+    /* Boton de cerrar propio, de texto -- el que agrega GTK automatico
+     * depende del icono del sistema, y en algunas maquinas se ve con
+     * un cuadro de fondo feo que no se puede arreglar por CSS. */
+    GtkWidget *boton_cerrar = gtk_button_new_with_label("\xC3\x97");
+    gtk_style_context_add_class(gtk_widget_get_style_context(boton_cerrar), "pawos-boton-cerrar-barra");
+    gtk_widget_set_tooltip_text(boton_cerrar, "Cerrar");
+    g_signal_connect_swapped(boton_cerrar, "clicked", G_CALLBACK(gtk_window_close), ventana);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(barra), boton_cerrar);
+
+    gtk_window_set_titlebar(ventana, barra);
+    return barra;
+}
+
+static gboolean revelar_pregunta_selector(gpointer datos) {
+    DatosBienvenidaSelector *d = (DatosBienvenidaSelector *)datos;
+    gtk_revealer_set_reveal_child(d->bienvenida, FALSE);
+    gtk_revealer_set_reveal_child(d->pregunta, TRUE);
+    gtk_revealer_set_reveal_child(d->botones, TRUE);
+    g_free(d);
+    return G_SOURCE_REMOVE;
+}
+
 /* Primera pantalla al abrir PawOS Refugio: elegir si quien entra es
  * personal del refugio (Colaborador, login existente contra la tabla
  * "usuarios") o publico externo (Cliente, tabla "clientes" aparte). */
@@ -4733,20 +5000,93 @@ static TipoEntrada mostrar_selector_entrada(void) {
         "Soy Cliente", RESPUESTA_CLIENTE,
         NULL);
     gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
+    /* Sin esto el gestor de ventanas trata el dialogo como una ventana
+     * simple y no muestra el boton de maximizar/restaurar. */
+    gtk_window_set_type_hint(GTK_WINDOW(dialogo), GDK_WINDOW_TYPE_HINT_NORMAL);
+    gtk_window_set_resizable(GTK_WINDOW(dialogo), TRUE);
+    agregar_barra_titulo_con_maximizar(GTK_WINDOW(dialogo), "PawOS Refugio");
+    gtk_window_maximize(GTK_WINDOW(dialogo));
 
     GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    gtk_style_context_add_class(gtk_widget_get_style_context(area), "pawos-fondo-dinamico");
+
+    GtkWidget *revelador_bienvenida = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(revelador_bienvenida), GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(revelador_bienvenida), 700);
+    GtkWidget *bienvenida = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(bienvenida),
+        "<span size='xx-large' weight='bold'>Bienvenid@ a PawOS</span>");
+    gtk_label_set_xalign(GTK_LABEL(bienvenida), 0.5);
+    gtk_widget_set_halign(bienvenida, GTK_ALIGN_FILL);
+    gtk_style_context_add_class(gtk_widget_get_style_context(bienvenida), "pawos-panel-inferior");
+    gtk_container_add(GTK_CONTAINER(revelador_bienvenida), bienvenida);
+    /* Misma barra de abajo donde despues aparece la pregunta, para que
+     * no quede flotando encima del logo de la imagen. */
+    gtk_widget_set_valign(revelador_bienvenida, GTK_ALIGN_END);
+    gtk_widget_set_halign(revelador_bienvenida, GTK_ALIGN_FILL);
+    gtk_widget_set_vexpand(revelador_bienvenida, TRUE);
+    gtk_container_add(GTK_CONTAINER(area), revelador_bienvenida);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(revelador_bienvenida), TRUE);
+
+    GtkWidget *revelador_pregunta = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(revelador_pregunta), GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(revelador_pregunta), 700);
+    gtk_widget_set_valign(revelador_pregunta, GTK_ALIGN_CENTER);
+    gtk_widget_set_vexpand(revelador_pregunta, TRUE);
+    gtk_container_add(GTK_CONTAINER(area), revelador_pregunta);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(revelador_pregunta), FALSE);
+
     GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_container_set_border_width(GTK_CONTAINER(caja), 16);
-    gtk_container_add(GTK_CONTAINER(area), caja);
+    gtk_container_add(GTK_CONTAINER(revelador_pregunta), caja);
+    gtk_style_context_add_class(gtk_widget_get_style_context(caja), "pawos-panel-inferior");
+    /* La imagen ya trae el logo y el nombre "PawOS" dibujados, asi que
+     * no repetimos el titulo aqui -- solo la pregunta. Ya no necesita
+     * valign/vexpand propios: el revelador de arriba se encarga de
+     * centrarla verticalmente. */
+    gtk_widget_set_halign(caja, GTK_ALIGN_FILL);
 
-    GtkWidget *titulo = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(titulo),
-        "<span size='large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
-    gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
-
-    GtkWidget *subtitulo = gtk_label_new("\xC2\xBF" "Como quieres entrar?");
-    gtk_widget_set_halign(subtitulo, GTK_ALIGN_START);
+    GtkWidget *subtitulo = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(subtitulo),
+        "<span size='large' weight='bold'>\xC2\xBF" "Como quieres entrar?</span>");
+    gtk_widget_set_halign(subtitulo, GTK_ALIGN_CENTER);
     gtk_box_pack_start(GTK_BOX(caja), subtitulo, FALSE, FALSE, 0);
+
+    GtkWidget *panel_botones = gtk_dialog_get_action_area(GTK_DIALOG(dialogo));
+    GtkWidget *revelador_botones = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(revelador_botones), GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(revelador_botones), 700);
+    if (panel_botones) {
+        gtk_style_context_add_class(gtk_widget_get_style_context(panel_botones), "pawos-panel-inferior");
+        gtk_button_box_set_layout(GTK_BUTTON_BOX(panel_botones), GTK_BUTTONBOX_CENTER);
+        GtkWidget *padre_botones = gtk_widget_get_parent(panel_botones);
+        if (padre_botones) {
+            g_object_ref(panel_botones);
+            gtk_container_remove(GTK_CONTAINER(padre_botones), panel_botones);
+            gtk_container_add(GTK_CONTAINER(revelador_botones), panel_botones);
+            g_object_unref(panel_botones);
+            gtk_container_add(GTK_CONTAINER(padre_botones), revelador_botones);
+        }
+    }
+    gtk_revealer_set_reveal_child(GTK_REVEALER(revelador_botones), FALSE);
+    GtkWidget *boton_salir = gtk_dialog_get_widget_for_response(GTK_DIALOG(dialogo), GTK_RESPONSE_CANCEL);
+    if (boton_salir) gtk_style_context_add_class(gtk_widget_get_style_context(boton_salir), "salir");
+    GtkWidget *boton_colaborador = gtk_dialog_get_widget_for_response(GTK_DIALOG(dialogo), RESPUESTA_COLABORADOR);
+    if (boton_colaborador) {
+        gtk_style_context_add_class(gtk_widget_get_style_context(boton_colaborador), "modulo");
+        gtk_style_context_add_class(gtk_widget_get_style_context(boton_colaborador), "cat-gestion");
+    }
+    GtkWidget *boton_cliente = gtk_dialog_get_widget_for_response(GTK_DIALOG(dialogo), RESPUESTA_CLIENTE);
+    if (boton_cliente) {
+        gtk_style_context_add_class(gtk_widget_get_style_context(boton_cliente), "modulo");
+        gtk_style_context_add_class(gtk_widget_get_style_context(boton_cliente), "cat-refugio");
+    }
+
+    DatosBienvenidaSelector *datos_bienvenida = g_new0(DatosBienvenidaSelector, 1);
+    datos_bienvenida->bienvenida = GTK_REVEALER(revelador_bienvenida);
+    datos_bienvenida->pregunta = GTK_REVEALER(revelador_pregunta);
+    datos_bienvenida->botones = GTK_REVEALER(revelador_botones);
+    g_timeout_add(1600, revelar_pregunta_selector, datos_bienvenida);
 
     mostrar_con_fundido(dialogo);
     gint respuesta = gtk_dialog_run(GTK_DIALOG(dialogo));
@@ -4778,9 +5118,11 @@ static gboolean mostrar_login_gtk(char *usuario_out, size_t usuario_len, Rol *ro
         gtk_window_set_position(GTK_WINDOW(dialogo), GTK_WIN_POS_CENTER);
 
         GtkWidget *area_contenido = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+        gtk_style_context_add_class(gtk_widget_get_style_context(area_contenido), "pawos-fondo-colaborador");
         GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
         gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
         gtk_container_add(GTK_CONTAINER(area_contenido), caja);
+        gtk_style_context_add_class(gtk_widget_get_style_context(caja), "pawos-fondo-transparente");
 
         GtkWidget *titulo = gtk_label_new(NULL);
         gtk_label_set_markup(GTK_LABEL(titulo),

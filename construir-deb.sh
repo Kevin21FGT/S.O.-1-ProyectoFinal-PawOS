@@ -73,6 +73,10 @@ install -m 755 pawos-actualizar-deb               "$RAIZ/usr/local/bin/pawos-act
 
 [ -f branding/pawos-icon.png ] && install -m 644 branding/pawos-icon.png "$RAIZ/usr/share/icons/pawos-icon.png"
 
+[ -f branding/fondo-bienvenida.png ] && install -m 644 branding/fondo-bienvenida.png "$RAIZ/usr/share/icons/fondo-bienvenida.png"
+
+[ -f branding/fondo-colaborador.png ] && install -m 644 branding/fondo-colaborador.png "$RAIZ/usr/share/icons/fondo-colaborador.png"
+
 echo "=== 3. Control del paquete (DEBIAN/control) ==="
 cat > "$RAIZ/DEBIAN/control" << EOF
 Package: ${PKG}
