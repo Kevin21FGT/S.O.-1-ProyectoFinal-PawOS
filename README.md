@@ -15,6 +15,7 @@ PawOS no es una distribución armada desde cero: es Debian 13 oficial, con un pr
 - [Módulos del programa](#módulos-del-programa)
 - [Personalización del sistema (branding)](#personalización-del-sistema-branding)
 - [Instalar PawOS sobre un Debian ya instalado](#instalar-pawos-sobre-un-debian-ya-instalado)
+- [Instalar desde el paquete .deb (companeros de equipo)](#instalar-desde-el-paquete-deb-companeros-de-equipo)
 - [Construir la ISO instalable](#construir-la-iso-instalable)
 - [Servicios del sistema (systemd)](#servicios-del-sistema-systemd)
 - [Actualizaciones automáticas (botón "Buscar Actualizaciones")](#actualizaciones-automáticas-botón-buscar-actualizaciones)
@@ -236,6 +237,36 @@ sudo bash instalar-pawos.sh
 
 Este script (pensado para correr sobre una instalación normal de Debian 13) hace todo de una vez: instala las librerías necesarias, compila el CLI y el GUI, instala los binarios en `/usr/local/bin`, crea los tres usuarios y sus grupos, crea `/var/pawos` con los permisos correctos, instala y habilita los servicios de systemd, configura el firewall, y crea los accesos directos de escritorio.
 
+## Instalar desde el paquete .deb (compañeros de equipo)
+
+Para repartir PawOS Refugio entre el equipo sin que cada quien tenga que compilar el código en su propia máquina, existe una segunda forma de instalar, más parecida a un instalador de Windows: un paquete `.deb` ya compilado.
+
+Diferencia con `instalar-pawos.sh`: ese script **compila** en la máquina de destino (necesita el código fuente y el compilador ahí). El paquete `.deb` en cambio se compila **una sola vez**, en la máquina de quien lo genera, y el resultado ya trae los binarios listos — quien lo instala no necesita el código fuente ni ningún compilador.
+
+### Generar el paquete
+
+Parado en la raíz del repo, con todo el código actualizado:
+
+```bash
+bash construir-deb.sh
+```
+
+Esto compila el CLI y el GUI, arma la estructura de un paquete Debian (binarios, accesos directos, servicios de systemd, reglas de sudo) y genera un archivo `pawos-refugio_<version>_amd64.deb` en la carpeta actual. La versión se toma automáticamente de `include/version.h`.
+
+### Instalar el paquete
+
+En la máquina del compañero (su propia VM de Debian 13), con el archivo `.deb` ya copiado ahí (por USB, Drive, etc.):
+
+```bash
+sudo apt install ./pawos-refugio_<version>_amd64.deb
+```
+
+`apt` resuelve automáticamente las dependencias que falten (GTK3, SQLite, ncurses, rclone, etc.). Al terminar, hay que cerrar sesión y volver a entrar para que los grupos nuevos de Linux queden activos (ver siguiente punto).
+
+### Diferencia importante con `instalar-pawos.sh`: no crea cuentas fijas
+
+Como el login de PawOS Refugio (tanto CLI como GUI) ya no depende de cuentas de Linux — se autentica contra la tabla `usuarios`/`clientes` de la base de datos, ver [Usuarios y roles](#usuarios-y-roles) — el paquete `.deb` **no** crea las cuentas fijas `admin_refugio`/`veterinario1`/`voluntario1` con contraseña en el código. En vez de eso, el script `postinst` del paquete agrega automáticamente a quien lo instaló (el usuario real detrás de `sudo`) a los grupos `pawos-admin` y `pawos-refugio`, que es lo único que sigue haciendo falta a nivel de Linux: el respaldo en la nube usa `sudo` gateado por el grupo `pawos-admin` (ver [Permisos (sudoers)](#respaldo-en-la-nube--estado-actual)), y el acceso de lectura/escritura a `/var/pawos` requiere estar en el grupo `pawos-refugio`.
+
 ## Construir la ISO instalable
 
 Esto arma un archivo `.iso` real: al arrancarlo (DVD, USB, o unidad óptica virtual) carga directo un escritorio Debian + GNOME con PawOS ya compilado, con los tres usuarios y todos los servicios listos, más un ícono "Instalar PawOS" en el escritorio que copia el sistema completo al disco de forma permanente (vía Calamares). No modifica ni reemplaza `instalar-pawos.sh`; es un proceso aparte, pensado para generar un medio de instalación distribuible.
@@ -348,6 +379,16 @@ Un botón "🔄 Buscar Actualizaciones" en el menú principal del GUI (`main_gtk
 2. Si la hay, muestra un resumen de las novedades (los mensajes de commit nuevos) antes de instalar nada.
 3. Descarga el código, recompila el CLI y el GUI (`make` / `make gui`), e instala los binarios nuevos en `/usr/local/bin`.
 4. Si algo falla en cualquier paso (sin internet, error de compilación, sin permisos), se conserva la versión que ya estaba funcionando y se muestra un mensaje de error claro — nunca deja el sistema a medio actualizar.
+
+### Dialogo de novedades antes de actualizar (estilo tienda de aplicaciones)
+
+Antes de abrir la terminal del paso anterior, el propio boton "🔄 Buscar Actualizaciones" (`on_actualizar_clicked` en `main_gtk.c`) ya hace una primera revision el mismo, sin necesitar la terminal para eso: corre un `git fetch` + `git log` corto contra `/opt/pawos-src`, y segun el resultado:
+
+- **Sin conexion:** muestra un mensaje de error simple ("revisa tu conexion a internet") y no abre nada mas.
+- **Ya esta al dia:** muestra "Ya tienes la ultima version instalada." y termina ahi, sin molestar con una terminal para nada.
+- **Hay una version nueva (o es la primera instalacion):** abre un dialogo nativo de GTK con el titulo "PawOS - Actualizaciones", el changelog (un renglon por cada commit nuevo, cada uno con un icono segun de que tipo es — 🔧 correccion/estabilidad, ⭐ mejora, ✨ novedad, detectado por palabras clave en el propio mensaje del commit) y dos botones: "Cancelar" y "Actualizar ahora". Solo si el usuario confirma con "Actualizar ahora" se abre la terminal con `pawos-actualizar-gui` para hacer la descarga/recompilacion real (ver arriba).
+
+La idea es que el usuario final vea de forma clara y agradable que va a cambiar *antes* de comprometerse a actualizar, en vez de encontrarse una terminal en blanco corriendo comandos — el mismo tipo de experiencia que Google Play o Windows Update.
 
 ### Diseño "de programa comercial" (sin exponer el repositorio)
 

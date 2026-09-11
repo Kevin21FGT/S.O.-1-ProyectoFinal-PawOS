@@ -5,6 +5,13 @@
 # reglas de sudoers (que necesitan rutas exactas) funcionen sin
 # importar que usuario (admin/veterinario/voluntario) lo ejecute.
 
+# Todo lo que este script cree (copia de git, objetos, binarios
+# compilados) debe quedar escribible para todo el grupo pawos-refugio,
+# no solo para quien lo corrio -- si no, el siguiente usuario que use
+# "Buscar Actualizaciones" no podra escribir ahi y fallara con un
+# error generico de conexion.
+umask 002
+
 REPO_URL=$(echo "aHR0cHM6Ly9naXRodWIuY29tL0tldmluMjFGR1QvUy5PLi0xLVByb3llY3RvRmluYWwtUGF3T1MuZ2l0" | base64 -d)
 REPO_DIR="/opt/pawos-src"
 

@@ -4,16 +4,16 @@
  */
 #include <ncurses.h>
 #include <stdio.h>
-#include "../include/db.h"
-#include "../include/ui.h"
-#include "../include/auth.h"
-#include "../include/pantallas.h"
-#include "../include/pantalla_procesos.h"
-#include "../include/pantalla_memoria.h"
-#include "../include/memoria.h"
-#include "../include/pantalla_login.h"
-#include "../include/archivos.h"
-#include "../include/pantalla_archivos.h"
+#include "db/db.h"
+#include "ui/ui.h"
+#include "auth/auth.h"
+#include "pantallas/pantallas.h"
+#include "pantalla_procesos/pantalla_procesos.h"
+#include "pantalla_memoria/pantalla_memoria.h"
+#include "memoria/memoria.h"
+#include "pantalla_login/pantalla_login.h"
+#include "archivos/archivos.h"
+#include "pantalla_archivos/pantalla_archivos.h"
 #define RUTA_BD_DEFECTO "/var/pawos/pawos.db"
 
 int main(int argc, char **argv) {
