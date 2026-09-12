@@ -84,7 +84,7 @@ Version: ${VERSION}
 Section: utils
 Priority: optional
 Architecture: ${ARCH}
-Depends: libgtk-3-0, libsqlite3-0, libncurses6, libcrypt1, python3, python3-pip, ufw, rclone
+Depends: libgtk-3-0, libsqlite3-0, libncurses6, libcrypt1, unixodbc, tdsodbc, python3, python3-pip, ufw, rclone
 Maintainer: Kevin Fuentes <${email:-kevin@pawos.local}>
 Description: PawOS Refugio - Sistema de gestion para refugios de animales
  Sistema de gestion (GUI y consola) para refugios de animales:
