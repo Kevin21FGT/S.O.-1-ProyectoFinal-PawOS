@@ -48,7 +48,38 @@ static int api_leer_password_remota(char *out, size_t out_len) {
     return 0;
 }
 
+static SQLHENV g_henv_remoto = NULL;
+static SQLHDBC  g_hdbc_remoto = NULL;
+static time_t   g_ultimo_uso_remoto = 0;
+static int      g_atexit_registrado_remoto = 0;
+#define API_SQL_MAX_IDLE_SEG 240 /* si pasan mas de 4 min sin usarla, se reconecta por si el servidor la cerro */
+
+static void api_cerrar_conexion_remota(void) {
+    if (g_hdbc_remoto != NULL) {
+        SQLDisconnect(g_hdbc_remoto);
+        SQLFreeHandle(SQL_HANDLE_DBC, g_hdbc_remoto);
+        g_hdbc_remoto = NULL;
+    }
+    if (g_henv_remoto != NULL) {
+        SQLFreeHandle(SQL_HANDLE_ENV, g_henv_remoto);
+        g_henv_remoto = NULL;
+    }
+}
+
 static int api_conectar(SQLHENV *out_henv, SQLHDBC *out_hdbc) {
+    /* Reutiliza una conexion ya abierta en vez de reconectar por
+     * internet en cada operacion (eso era lo que causaba la lentitud). */
+    time_t ahora = time(NULL);
+    if (g_hdbc_remoto != NULL && (ahora - g_ultimo_uso_remoto) > API_SQL_MAX_IDLE_SEG) {
+        api_cerrar_conexion_remota();
+    }
+    if (g_hdbc_remoto != NULL) {
+        g_ultimo_uso_remoto = ahora;
+        *out_henv = g_henv_remoto;
+        *out_hdbc = g_hdbc_remoto;
+        return 0;
+    }
+
     char pass[128];
     if (api_leer_password_remota(pass, sizeof(pass)) != 0) return -1;
 
@@ -78,15 +109,23 @@ static int api_conectar(SQLHENV *out_henv, SQLHDBC *out_hdbc) {
         return -1;
     }
 
+    g_henv_remoto = henv;
+    g_hdbc_remoto = hdbc;
+    g_ultimo_uso_remoto = ahora;
+    if (!g_atexit_registrado_remoto) {
+        atexit(api_cerrar_conexion_remota);
+        g_atexit_registrado_remoto = 1;
+    }
     *out_henv = henv;
     *out_hdbc = hdbc;
     return 0;
 }
 
 static void api_desconectar(SQLHENV henv, SQLHDBC hdbc) {
-    SQLDisconnect(hdbc);
-    SQLFreeHandle(SQL_HANDLE_DBC, hdbc);
-    SQLFreeHandle(SQL_HANDLE_ENV, henv);
+    /* Ya no se cierra aqui: se mantiene la conexion abierta y se
+     * reutiliza en la siguiente operacion (ver api_conectar arriba).
+     * Se cierra una sola vez al salir del programa. */
+    (void)henv; (void)hdbc;
 }
 
 static void api_leer_fila_mascota(SQLHSTMT hstmt, Mascota *m) {
@@ -118,6 +157,41 @@ static void api_leer_fila_vacuna_base(SQLHSTMT hstmt, Vacuna *v) {
     if (ind == SQL_NULL_DATA) v->fecha_proxima[0] = '\0';
     SQLGetData(hstmt, 6, SQL_C_CHAR, v->observaciones, sizeof(v->observaciones), &ind);
     if (ind == SQL_NULL_DATA) v->observaciones[0] = '\0';
+}
+
+static void api_leer_fila_adopcion(SQLHSTMT hstmt, Adopcion *a) {
+    SQLLEN ind;
+    memset(a, 0, sizeof(*a));
+    SQLGetData(hstmt, 1, SQL_C_LONG, &a->id, 0, &ind);
+    SQLGetData(hstmt, 2, SQL_C_LONG, &a->mascota_id, 0, &ind);
+    SQLGetData(hstmt, 3, SQL_C_CHAR, a->adoptante_nombre, sizeof(a->adoptante_nombre), &ind);
+    SQLGetData(hstmt, 4, SQL_C_CHAR, a->adoptante_contacto, sizeof(a->adoptante_contacto), &ind);
+    if (ind == SQL_NULL_DATA) a->adoptante_contacto[0] = '\0';
+    SQLGetData(hstmt, 5, SQL_C_CHAR, a->fecha_adopcion, sizeof(a->fecha_adopcion), &ind);
+}
+
+static void api_leer_fila_donante(SQLHSTMT hstmt, Donante *d) {
+    SQLLEN ind;
+    memset(d, 0, sizeof(*d));
+    SQLGetData(hstmt, 1, SQL_C_LONG, &d->id, 0, &ind);
+    SQLGetData(hstmt, 2, SQL_C_CHAR, d->nombre, sizeof(d->nombre), &ind);
+    SQLGetData(hstmt, 3, SQL_C_CHAR, d->contacto, sizeof(d->contacto), &ind);
+    if (ind == SQL_NULL_DATA) d->contacto[0] = '\0';
+    SQLGetData(hstmt, 4, SQL_C_DOUBLE, &d->monto, 0, &ind);
+    SQLGetData(hstmt, 5, SQL_C_CHAR, d->fecha, sizeof(d->fecha), &ind);
+}
+
+static void api_leer_fila_alerta(SQLHSTMT hstmt, Alerta *al) {
+    SQLLEN ind;
+    memset(al, 0, sizeof(*al));
+    SQLGetData(hstmt, 1, SQL_C_LONG, &al->id, 0, &ind);
+    SQLGetData(hstmt, 2, SQL_C_CHAR, al->animal_id, sizeof(al->animal_id), &ind);
+    SQLGetData(hstmt, 3, SQL_C_CHAR, al->tipo, sizeof(al->tipo), &ind);
+    SQLGetData(hstmt, 4, SQL_C_CHAR, al->detalle, sizeof(al->detalle), &ind);
+    if (ind == SQL_NULL_DATA) al->detalle[0] = '\0';
+    SQLGetData(hstmt, 5, SQL_C_DOUBLE, &al->valor, 0, &ind);
+    SQLGetData(hstmt, 6, SQL_C_CHAR, al->fecha_hora, sizeof(al->fecha_hora), &ind);
+    SQLGetData(hstmt, 7, SQL_C_LONG, &al->atendida, 0, &ind);
 }
 /* ==== Fin de utilidades de conexion remota ==== */
 
@@ -911,57 +985,92 @@ int vacuna_marcar_recordatorio_enviado(int id) {
 /* ---------------- Adopciones ---------------- */
 
 int adopcion_registrar(const Adopcion *a) {
-    /* transaccion: registrar adopcion + marcar mascota como adoptada */
-    char *err = NULL;
-    sqlite3_exec(g_db, "BEGIN;", NULL, NULL, &err);
+    /* transaccion: registrar adopcion + marcar mascota como adoptada.
+     * Se usa UNA sola conexion ODBC con autocommit apagado para que
+     * las dos escrituras (adopciones + mascotas) queden en la misma
+     * transaccion, igual que hacia el BEGIN/COMMIT/ROLLBACK original. */
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_OFF, 0);
 
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_ROLLBACK);
+        SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql =
         "INSERT INTO adopciones (mascota_id, adoptante_nombre, adoptante_contacto, fecha_adopcion) "
         "VALUES (?,?,?,?);";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) {
-        sqlite3_exec(g_db, "ROLLBACK;", NULL, NULL, NULL);
-        return -1;
-    }
-    sqlite3_bind_int(st, 1, a->mascota_id);
-    sqlite3_bind_text(st, 2, a->adoptante_nombre, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 3, a->adoptante_contacto, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 4, a->fecha_adopcion, -1, SQLITE_STATIC);
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    if (rc != SQLITE_DONE) {
-        sqlite3_exec(g_db, "ROLLBACK;", NULL, NULL, NULL);
-        return -1;
-    }
-
-    if (mascota_actualizar_estado(a->mascota_id, "adoptado") != 0) {
-        sqlite3_exec(g_db, "ROLLBACK;", NULL, NULL, NULL);
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER mascota_id = a->mascota_id;
+    SQLLEN len_nom = SQL_NTS, len_cont = SQL_NTS, len_fecha = SQL_NTS;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &mascota_id, 0, NULL);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(a->adoptante_nombre), 0, (SQLPOINTER)a->adoptante_nombre, 0, &len_nom);
+    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(a->adoptante_contacto), 0, (SQLPOINTER)a->adoptante_contacto, 0, &len_cont);
+    SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(a->fecha_adopcion), 0, (SQLPOINTER)a->fecha_adopcion, 0, &len_fecha);
+    SQLRETURN ret = SQLExecute(hstmt);
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    if (!SQL_SUCCEEDED(ret)) {
+        SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_ROLLBACK);
+        SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
+        api_desconectar(henv, hdbc);
         return -1;
     }
 
-    sqlite3_exec(g_db, "COMMIT;", NULL, NULL, &err);
+    SQLHSTMT hstmt2;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt2) != SQL_SUCCESS) {
+        SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_ROLLBACK);
+        SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql2 = "UPDATE mascotas SET estado=? WHERE id=?;";
+    SQLPrepare(hstmt2, (SQLCHAR *)sql2, SQL_NTS);
+    SQLLEN len_estado = SQL_NTS;
+    SQLBindParameter(hstmt2, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 16, 0, (SQLPOINTER)"adoptado", 0, &len_estado);
+    SQLINTEGER mascota_id2 = a->mascota_id;
+    SQLBindParameter(hstmt2, 2, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &mascota_id2, 0, NULL);
+    ret = SQLExecute(hstmt2);
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt2);
+    if (!SQL_SUCCEEDED(ret)) {
+        SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_ROLLBACK);
+        SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+
+    SQLEndTran(SQL_HANDLE_DBC, hdbc, SQL_COMMIT);
+    SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
+    api_desconectar(henv, hdbc);
     return 0;
 }
 
 int adopcion_listar(Adopcion **out, int *n) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql =
         "SELECT id,mascota_id,adoptante_nombre,adoptante_contacto,fecha_adopcion FROM adopciones ORDER BY id;";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    if (!SQL_SUCCEEDED(SQLExecDirect(hstmt, (SQLCHAR *)sql, SQL_NTS))) {
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     int cap = 16, cnt = 0;
     Adopcion *arr = malloc(sizeof(Adopcion) * cap);
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        if (cnt == cap) { cap *= 2; arr = realloc(arr, sizeof(Adopcion) * cap); }
-        Adopcion *a = &arr[cnt++];
-        memset(a, 0, sizeof(*a));
-        a->id = sqlite3_column_int(st, 0);
-        a->mascota_id = sqlite3_column_int(st, 1);
-        snprintf(a->adoptante_nombre, sizeof(a->adoptante_nombre), "%s", (const char*)sqlite3_column_text(st, 2));
-        const unsigned char *c = sqlite3_column_text(st, 3);
-        snprintf(a->adoptante_contacto, sizeof(a->adoptante_contacto), "%s", c ? (const char*)c : "");
-        snprintf(a->fecha_adopcion, sizeof(a->fecha_adopcion), "%s", (const char*)sqlite3_column_text(st, 4));
+    while (SQLFetch(hstmt) == SQL_SUCCESS) {
+        if (cnt >= cap) { cap *= 2; arr = realloc(arr, sizeof(Adopcion) * cap); }
+        api_leer_fila_adopcion(hstmt, &arr[cnt]);
+        cnt++;
     }
-    sqlite3_finalize(st);
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
     *out = arr;
     *n = cnt;
     return 0;
@@ -970,67 +1079,100 @@ int adopcion_listar(Adopcion **out, int *n) {
 /* ---------------- Donantes ---------------- */
 
 int donante_agregar(const Donante *d) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql = "INSERT INTO donantes (nombre, contacto, monto, fecha) VALUES (?,?,?,?);";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
-    sqlite3_bind_text(st, 1, d->nombre, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 2, d->contacto, -1, SQLITE_STATIC);
-    sqlite3_bind_double(st, 3, d->monto);
-    sqlite3_bind_text(st, 4, d->fecha, -1, SQLITE_STATIC);
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE ? 0 : -1;
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLLEN len_nom = SQL_NTS, len_cont = SQL_NTS, len_fecha = SQL_NTS;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(d->nombre), 0, (SQLPOINTER)d->nombre, 0, &len_nom);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(d->contacto), 0, (SQLPOINTER)d->contacto, 0, &len_cont);
+    SQLDOUBLE monto = d->monto;
+    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_DOUBLE, SQL_DOUBLE, 0, 0, &monto, 0, NULL);
+    SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(d->fecha), 0, (SQLPOINTER)d->fecha, 0, &len_fecha);
+    SQLRETURN ret = SQLExecute(hstmt);
+    int ok = SQL_SUCCEEDED(ret) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
 }
 
 int donante_listar(Donante **out, int *n) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql = "SELECT id,nombre,contacto,monto,fecha FROM donantes ORDER BY id;";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    if (!SQL_SUCCEEDED(SQLExecDirect(hstmt, (SQLCHAR *)sql, SQL_NTS))) {
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     int cap = 16, cnt = 0;
     Donante *arr = malloc(sizeof(Donante) * cap);
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        if (cnt == cap) { cap *= 2; arr = realloc(arr, sizeof(Donante) * cap); }
-        Donante *d = &arr[cnt++];
-        memset(d, 0, sizeof(*d));
-        d->id = sqlite3_column_int(st, 0);
-        snprintf(d->nombre, sizeof(d->nombre), "%s", (const char*)sqlite3_column_text(st, 1));
-        const unsigned char *c = sqlite3_column_text(st, 2);
-        snprintf(d->contacto, sizeof(d->contacto), "%s", c ? (const char*)c : "");
-        d->monto = sqlite3_column_double(st, 3);
-        snprintf(d->fecha, sizeof(d->fecha), "%s", (const char*)sqlite3_column_text(st, 4));
+    while (SQLFetch(hstmt) == SQL_SUCCESS) {
+        if (cnt >= cap) { cap *= 2; arr = realloc(arr, sizeof(Donante) * cap); }
+        api_leer_fila_donante(hstmt, &arr[cnt]);
+        cnt++;
     }
-    sqlite3_finalize(st);
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
     *out = arr;
     *n = cnt;
     return 0;
 }
 
 double donante_total_recaudado(void) {
-    const char *sql = "SELECT COALESCE(SUM(monto),0) FROM donantes;";
-    sqlite3_stmt *st;
-    double total = 0.0;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) == SQLITE_OK) {
-        if (sqlite3_step(st) == SQLITE_ROW) total = sqlite3_column_double(st, 0);
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return 0.0;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return 0.0;
     }
-    sqlite3_finalize(st);
+    const char *sql = "SELECT COALESCE(SUM(monto),0) FROM donantes;";
+    double total = 0.0;
+    if (SQL_SUCCEEDED(SQLExecDirect(hstmt, (SQLCHAR *)sql, SQL_NTS)) && SQLFetch(hstmt) == SQL_SUCCESS) {
+        SQLLEN ind;
+        SQLGetData(hstmt, 1, SQL_C_DOUBLE, &total, 0, &ind);
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
     return total;
 }
 
 /* ---------------- Alertas de sensores (ESP32) ---------------- */
 
 int alerta_registrar(const Alerta *a) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql =
         "INSERT INTO alertas_sensores (animal_id, tipo, detalle, valor, fecha_hora, atendida) "
-        "VALUES (?,?,?,?, datetime('now','localtime'), 0);";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
-    sqlite3_bind_text(st, 1, a->animal_id, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 2, a->tipo, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 3, a->detalle, -1, SQLITE_STATIC);
-    sqlite3_bind_double(st, 4, a->valor);
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE ? 0 : -1;
+        "VALUES (?,?,?,?, CONVERT(varchar(19), GETDATE(), 120), 0);";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLLEN len_animal = SQL_NTS, len_tipo = SQL_NTS, len_detalle = SQL_NTS;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(a->animal_id), 0, (SQLPOINTER)a->animal_id, 0, &len_animal);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(a->tipo), 0, (SQLPOINTER)a->tipo, 0, &len_tipo);
+    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(a->detalle), 0, (SQLPOINTER)a->detalle, 0, &len_detalle);
+    SQLDOUBLE valor = a->valor;
+    SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_DOUBLE, SQL_DOUBLE, 0, 0, &valor, 0, NULL);
+    SQLRETURN ret = SQLExecute(hstmt);
+    int ok = SQL_SUCCEEDED(ret) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
 }
 
 static int alerta_query(const char *sql, Alerta **out, int *n) {
@@ -1058,26 +1200,79 @@ static int alerta_query(const char *sql, Alerta **out, int *n) {
 }
 
 int alerta_listar(Alerta **out, int *n) {
-    return alerta_query(
-        "SELECT id,animal_id,tipo,detalle,valor,fecha_hora,atendida FROM alertas_sensores ORDER BY id DESC;",
-        out, n);
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "SELECT id,animal_id,tipo,detalle,valor,fecha_hora,atendida FROM alertas_sensores ORDER BY id DESC;";
+    if (!SQL_SUCCEEDED(SQLExecDirect(hstmt, (SQLCHAR *)sql, SQL_NTS))) {
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    int cap = 16, cnt = 0;
+    Alerta *arr = malloc(sizeof(Alerta) * cap);
+    while (SQLFetch(hstmt) == SQL_SUCCESS) {
+        if (cnt >= cap) { cap *= 2; arr = realloc(arr, sizeof(Alerta) * cap); }
+        api_leer_fila_alerta(hstmt, &arr[cnt]);
+        cnt++;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    *out = arr;
+    *n = cnt;
+    return 0;
 }
 
 int alerta_pendientes(Alerta **out, int *n) {
-    return alerta_query(
-        "SELECT id,animal_id,tipo,detalle,valor,fecha_hora,atendida FROM alertas_sensores "
-        "WHERE atendida = 0 ORDER BY id DESC;",
-        out, n);
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "SELECT id,animal_id,tipo,detalle,valor,fecha_hora,atendida FROM alertas_sensores "
+        "WHERE atendida = 0 ORDER BY id DESC;";
+    if (!SQL_SUCCEEDED(SQLExecDirect(hstmt, (SQLCHAR *)sql, SQL_NTS))) {
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    int cap = 16, cnt = 0;
+    Alerta *arr = malloc(sizeof(Alerta) * cap);
+    while (SQLFetch(hstmt) == SQL_SUCCESS) {
+        if (cnt >= cap) { cap *= 2; arr = realloc(arr, sizeof(Alerta) * cap); }
+        api_leer_fila_alerta(hstmt, &arr[cnt]);
+        cnt++;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    *out = arr;
+    *n = cnt;
+    return 0;
 }
 
 int alerta_marcar_atendida(int id) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql = "UPDATE alertas_sensores SET atendida = 1 WHERE id = ?;";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
-    sqlite3_bind_int(st, 1, id);
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE ? 0 : -1;
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER id_param = id;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_param, 0, NULL);
+    SQLRETURN ret = SQLExecute(hstmt);
+    int ok = SQL_SUCCEEDED(ret) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
 }
 
 /* ---------------- Notas del veterinario ---------------- */
