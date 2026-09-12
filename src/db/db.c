@@ -101,6 +101,24 @@ static void api_leer_fila_mascota(SQLHSTMT hstmt, Mascota *m) {
     SQLGetData(hstmt, 6, SQL_C_CHAR, m->estado, sizeof(m->estado), &ind);
     SQLGetData(hstmt, 7, SQL_C_CHAR, m->fecha_ingreso, sizeof(m->fecha_ingreso), &ind);
 }
+
+/* Helper equivalente para Vacuna. Lee las primeras 6 columnas comunes
+ * a todas las consultas (id,mascota_id,nombre_vacuna,fecha_aplicacion,
+ * fecha_proxima,observaciones). cliente_id se lee aparte en cada
+ * funcion porque no todas las consultas lo incluyen (igual que en el
+ * codigo original con SQLite). */
+static void api_leer_fila_vacuna_base(SQLHSTMT hstmt, Vacuna *v) {
+    SQLLEN ind;
+    memset(v, 0, sizeof(*v));
+    SQLGetData(hstmt, 1, SQL_C_LONG, &v->id, 0, &ind);
+    SQLGetData(hstmt, 2, SQL_C_LONG, &v->mascota_id, 0, &ind);
+    SQLGetData(hstmt, 3, SQL_C_CHAR, v->nombre_vacuna, sizeof(v->nombre_vacuna), &ind);
+    SQLGetData(hstmt, 4, SQL_C_CHAR, v->fecha_aplicacion, sizeof(v->fecha_aplicacion), &ind);
+    SQLGetData(hstmt, 5, SQL_C_CHAR, v->fecha_proxima, sizeof(v->fecha_proxima), &ind);
+    if (ind == SQL_NULL_DATA) v->fecha_proxima[0] = '\0';
+    SQLGetData(hstmt, 6, SQL_C_CHAR, v->observaciones, sizeof(v->observaciones), &ind);
+    if (ind == SQL_NULL_DATA) v->observaciones[0] = '\0';
+}
 /* ==== Fin de utilidades de conexion remota ==== */
 
 
@@ -657,70 +675,97 @@ int mascota_buscar_por_id(int id, Mascota *out) {
 /* ---------------- Vacunas ---------------- */
 
 int vacuna_agregar(const Vacuna *v) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql =
         "INSERT INTO vacunas (mascota_id, nombre_vacuna, fecha_aplicacion, fecha_proxima, observaciones, cliente_id) "
         "VALUES (?,?,?,?,?,?);";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
-    sqlite3_bind_int(st, 1, v->mascota_id);
-    sqlite3_bind_text(st, 2, v->nombre_vacuna, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 3, v->fecha_aplicacion, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 4, v->fecha_proxima, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 5, v->observaciones, -1, SQLITE_STATIC);
-    if (v->cliente_id > 0) {
-        sqlite3_bind_int(st, 6, v->cliente_id);
-    } else {
-        sqlite3_bind_null(st, 6);
-    }
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE ? 0 : -1;
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER mascota_id = v->mascota_id;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &mascota_id, 0, NULL);
+    SQLLEN len_nombre = SQL_NTS, len_fapl = SQL_NTS, len_fprox = SQL_NTS, len_obs = SQL_NTS;
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(v->nombre_vacuna), 0, (SQLPOINTER)v->nombre_vacuna, 0, &len_nombre);
+    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(v->fecha_aplicacion), 0, (SQLPOINTER)v->fecha_aplicacion, 0, &len_fapl);
+    SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(v->fecha_proxima), 0, (SQLPOINTER)v->fecha_proxima, 0, &len_fprox);
+    SQLBindParameter(hstmt, 5, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(v->observaciones), 0, (SQLPOINTER)v->observaciones, 0, &len_obs);
+    SQLINTEGER cliente_id = v->cliente_id;
+    SQLLEN ind_cliente = (v->cliente_id > 0) ? 0 : SQL_NULL_DATA;
+    SQLBindParameter(hstmt, 6, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &cliente_id, 0, &ind_cliente);
+    SQLRETURN ret = SQLExecute(hstmt);
+    int ok = SQL_SUCCEEDED(ret) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
 }
 
 int vacuna_buscar_por_id(int id, Vacuna *out) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql = "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones FROM vacunas WHERE id=?;";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
-    sqlite3_bind_int(st, 1, id);
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER id_param = id;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_param, 0, NULL);
     int found = -1;
-    if (sqlite3_step(st) == SQLITE_ROW) {
-        memset(out, 0, sizeof(*out));
-        out->id = sqlite3_column_int(st, 0);
-        out->mascota_id = sqlite3_column_int(st, 1);
-        snprintf(out->nombre_vacuna, sizeof(out->nombre_vacuna), "%s", (const char*)sqlite3_column_text(st, 2));
-        snprintf(out->fecha_aplicacion, sizeof(out->fecha_aplicacion), "%s", (const char*)sqlite3_column_text(st, 3));
-        const unsigned char *fp = sqlite3_column_text(st, 4);
-        snprintf(out->fecha_proxima, sizeof(out->fecha_proxima), "%s", fp ? (const char*)fp : "");
-        const unsigned char *obs = sqlite3_column_text(st, 5);
-        snprintf(out->observaciones, sizeof(out->observaciones), "%s", obs ? (const char*)obs : "");
+    if (SQL_SUCCEEDED(SQLExecute(hstmt)) && SQLFetch(hstmt) == SQL_SUCCESS) {
+        api_leer_fila_vacuna_base(hstmt, out);
         found = 0;
     }
-    sqlite3_finalize(st);
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
     return found;
 }
 
 int vacuna_actualizar(const Vacuna *v) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql = "UPDATE vacunas SET nombre_vacuna=?, fecha_aplicacion=?, fecha_proxima=?, observaciones=? WHERE id=?;";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
-    sqlite3_bind_text(st, 1, v->nombre_vacuna, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 2, v->fecha_aplicacion, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 3, v->fecha_proxima, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 4, v->observaciones, -1, SQLITE_STATIC);
-    sqlite3_bind_int(st, 5, v->id);
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE ? 0 : -1;
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLLEN len1 = SQL_NTS, len2 = SQL_NTS, len3 = SQL_NTS, len4 = SQL_NTS;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(v->nombre_vacuna), 0, (SQLPOINTER)v->nombre_vacuna, 0, &len1);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(v->fecha_aplicacion), 0, (SQLPOINTER)v->fecha_aplicacion, 0, &len2);
+    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(v->fecha_proxima), 0, (SQLPOINTER)v->fecha_proxima, 0, &len3);
+    SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(v->observaciones), 0, (SQLPOINTER)v->observaciones, 0, &len4);
+    SQLINTEGER id_param = v->id;
+    SQLBindParameter(hstmt, 5, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_param, 0, NULL);
+    SQLRETURN ret = SQLExecute(hstmt);
+    int ok = SQL_SUCCEEDED(ret) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
 }
 
 int vacuna_eliminar(int id) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
     const char *sql = "DELETE FROM vacunas WHERE id=?;";
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
-    sqlite3_bind_int(st, 1, id);
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE ? 0 : -1;
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER id_param = id;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_param, 0, NULL);
+    SQLRETURN ret = SQLExecute(hstmt);
+    int ok = SQL_SUCCEEDED(ret) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
 }
 
 static int vacuna_query(const char *sql, Vacuna **out, int *n) {
@@ -749,9 +794,37 @@ static int vacuna_query(const char *sql, Vacuna **out, int *n) {
 }
 
 int vacuna_listar(Vacuna **out, int *n) {
-    return vacuna_query(
-        "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones,cliente_id FROM vacunas ORDER BY fecha_proxima;",
-        out, n);
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones,cliente_id FROM vacunas ORDER BY fecha_proxima;";
+    if (!SQL_SUCCEEDED(SQLExecDirect(hstmt, (SQLCHAR *)sql, SQL_NTS))) {
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    int cap = 16, cnt = 0;
+    Vacuna *arr = malloc(sizeof(Vacuna) * cap);
+    while (SQLFetch(hstmt) == SQL_SUCCESS) {
+        if (cnt >= cap) {
+            cap *= 2;
+            arr = realloc(arr, sizeof(Vacuna) * cap);
+        }
+        api_leer_fila_vacuna_base(hstmt, &arr[cnt]);
+        SQLLEN ind;
+        SQLGetData(hstmt, 7, SQL_C_LONG, &arr[cnt].cliente_id, 0, &ind);
+        if (ind == SQL_NULL_DATA) arr[cnt].cliente_id = 0;
+        cnt++;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    *out = arr;
+    *n = cnt;
+    return 0;
 }
 
 int vacuna_pendientes(Vacuna **out, int *n) {
@@ -763,24 +836,76 @@ int vacuna_pendientes(Vacuna **out, int *n) {
     snprintf(sql, sizeof(sql),
         "SELECT id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones,cliente_id FROM vacunas "
         "WHERE fecha_proxima IS NOT NULL AND fecha_proxima <= '%s' ORDER BY fecha_proxima;", hoy);
-    return vacuna_query(sql, out, n);
+
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    if (!SQL_SUCCEEDED(SQLExecDirect(hstmt, (SQLCHAR *)sql, SQL_NTS))) {
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    int cap = 16, cnt = 0;
+    Vacuna *arr = malloc(sizeof(Vacuna) * cap);
+    while (SQLFetch(hstmt) == SQL_SUCCESS) {
+        if (cnt >= cap) {
+            cap *= 2;
+            arr = realloc(arr, sizeof(Vacuna) * cap);
+        }
+        api_leer_fila_vacuna_base(hstmt, &arr[cnt]);
+        SQLLEN ind;
+        SQLGetData(hstmt, 7, SQL_C_LONG, &arr[cnt].cliente_id, 0, &ind);
+        if (ind == SQL_NULL_DATA) arr[cnt].cliente_id = 0;
+        cnt++;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    *out = arr;
+    *n = cnt;
+    return 0;
 }
 int vacuna_recordatorio_enviado(int id) {
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, "SELECT recordatorio_enviado FROM vacunas WHERE id=?;", -1, &st, NULL) != SQLITE_OK) return 0;
-    sqlite3_bind_int(st, 1, id);
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return 0;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return 0;
+    }
+    const char *sql = "SELECT recordatorio_enviado FROM vacunas WHERE id=?;";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER id_param = id;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_param, 0, NULL);
     int enviado = 0;
-    if (sqlite3_step(st) == SQLITE_ROW) enviado = sqlite3_column_int(st, 0);
-    sqlite3_finalize(st);
+    if (SQL_SUCCEEDED(SQLExecute(hstmt)) && SQLFetch(hstmt) == SQL_SUCCESS) {
+        SQLLEN ind;
+        SQLGetData(hstmt, 1, SQL_C_LONG, &enviado, 0, &ind);
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
     return enviado;
 }
 int vacuna_marcar_recordatorio_enviado(int id) {
-    sqlite3_stmt *st;
-    if (sqlite3_prepare_v2(g_db, "UPDATE vacunas SET recordatorio_enviado=1 WHERE id=?;", -1, &st, NULL) != SQLITE_OK) return -1;
-    sqlite3_bind_int(st, 1, id);
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE ? 0 : -1;
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "UPDATE vacunas SET recordatorio_enviado=1 WHERE id=?;";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER id_param = id;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_param, 0, NULL);
+    SQLRETURN ret = SQLExecute(hstmt);
+    int ok = SQL_SUCCEEDED(ret) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
 }
 
 /* ---------------- Adopciones ---------------- */
