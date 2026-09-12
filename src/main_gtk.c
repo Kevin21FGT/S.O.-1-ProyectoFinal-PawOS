@@ -681,9 +681,26 @@ typedef struct {
 static void cargar_mascotas(ContextoMascotas *ctx) {
     gtk_list_store_clear(ctx->store);
 
+    /* Cursor de "cargando" mientras espera la respuesta del SQL Server
+     * remoto, para que la pantalla no se sienta congelada. */
+    GdkWindow *gdkwin_carga = gtk_widget_get_window(ctx->ventana);
+    GdkCursor *cursor_reloj = NULL;
+    if (gdkwin_carga) {
+        cursor_reloj = gdk_cursor_new_for_display(gdk_display_get_default(), GDK_WATCH);
+        gdk_window_set_cursor(gdkwin_carga, cursor_reloj);
+        while (gtk_events_pending()) gtk_main_iteration();
+    }
+
     Mascota *ms;
     int n;
-    if (mascota_listar(&ms, &n) != 0) {
+    int rc_listar = mascota_listar(&ms, &n);
+
+    if (gdkwin_carga) {
+        gdk_window_set_cursor(gdkwin_carga, NULL);
+        if (cursor_reloj) g_object_unref(cursor_reloj);
+    }
+
+    if (rc_listar != 0) {
         mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo leer la lista de mascotas.", TRUE);
         return;
     }
