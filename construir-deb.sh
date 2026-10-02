@@ -48,6 +48,9 @@ make clean
 make all
 make clean-gui
 make gui
+make vacunas-gui
+make monitor-gui
+make portal-clientes
 
 echo "=== 2. Armando estructura del paquete ==="
 rm -rf "deb-build"
@@ -62,6 +65,9 @@ install -m 755 pawos-refugio        "$RAIZ/usr/local/bin/pawos-refugio"
 install -m 755 pawos-vacunas-check  "$RAIZ/usr/local/bin/pawos-vacunas-check"
 install -m 755 pawos-monitoreo      "$RAIZ/usr/local/bin/pawos-monitoreo"
 install -m 755 pawos-refugio-gui    "$RAIZ/usr/local/bin/pawos-refugio-gui"
+install -m 755 pawos-vacunas-gui     "$RAIZ/usr/local/bin/pawos-vacunas-gui"
+install -m 755 pawos-monitor-gui     "$RAIZ/usr/local/bin/pawos-monitor-gui"
+install -m 755 pawos-portal-clientes "$RAIZ/usr/local/bin/pawos-portal-clientes"
 
 install -m 755 pawos-notificar-cita              "$RAIZ/usr/local/bin/pawos-notificar-cita"
 install -m 755 pawos-configurar-notificaciones   "$RAIZ/usr/local/bin/pawos-configurar-notificaciones"
@@ -108,6 +114,36 @@ Type=Application
 Name=PawOS Refugio (GUI)
 Comment=Sistema de gestion para refugio de animales
 Exec=/usr/local/bin/pawos-refugio-gui
+Terminal=false
+Icon=/usr/share/icons/pawos-icon.png
+Categories=Utility;
+EOF
+cat > "$RAIZ/usr/share/applications/pawos-vacunas-gui.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=PawOS Vacunas
+Comment=Agenda de vacunas del refugio
+Exec=/usr/local/bin/pawos-vacunas-gui
+Terminal=false
+Icon=/usr/share/icons/pawos-icon.png
+Categories=Utility;
+EOF
+cat > "$RAIZ/usr/share/applications/pawos-monitor-gui.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=PawOS Monitor
+Comment=Monitoreo de CPU, memoria, swap y disco en tiempo real
+Exec=/usr/local/bin/pawos-monitor-gui
+Terminal=false
+Icon=/usr/share/icons/pawos-icon.png
+Categories=Utility;
+EOF
+cat > "$RAIZ/usr/share/applications/pawos-portal-clientes.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=PawOS Portal de Clientes
+Comment=Portal para que los clientes vean sus datos y recordatorios de vacunas
+Exec=/usr/local/bin/pawos-portal-clientes
 Terminal=false
 Icon=/usr/share/icons/pawos-icon.png
 Categories=Utility;
@@ -368,11 +404,17 @@ if [ -n "$USUARIO_REAL" ] && id "$USUARIO_REAL" &>/dev/null; then
         if [ -d "$CARPETA" ]; then
             cp /usr/share/applications/pawos-refugio.desktop     "$CARPETA/" 2>/dev/null || true
             cp /usr/share/applications/pawos-refugio-gui.desktop "$CARPETA/" 2>/dev/null || true
+            cp /usr/share/applications/pawos-vacunas-gui.desktop "$CARPETA/" 2>/dev/null || true
+            cp /usr/share/applications/pawos-monitor-gui.desktop "$CARPETA/" 2>/dev/null || true
+            cp /usr/share/applications/pawos-portal-clientes.desktop "$CARPETA/" 2>/dev/null || true
             cp /usr/share/applications/pawos-apagar.desktop      "$CARPETA/" 2>/dev/null || true
             chmod +x "$CARPETA"/pawos-*.desktop 2>/dev/null || true
             chown "$USUARIO_REAL":"$USUARIO_REAL" "$CARPETA"/pawos-*.desktop 2>/dev/null || true
             gio set "$CARPETA/pawos-refugio.desktop" metadata::trusted true 2>/dev/null || true
             gio set "$CARPETA/pawos-refugio-gui.desktop" metadata::trusted true 2>/dev/null || true
+            gio set "$CARPETA/pawos-vacunas-gui.desktop" metadata::trusted true 2>/dev/null || true
+            gio set "$CARPETA/pawos-monitor-gui.desktop" metadata::trusted true 2>/dev/null || true
+            gio set "$CARPETA/pawos-portal-clientes.desktop" metadata::trusted true 2>/dev/null || true
             gio set "$CARPETA/pawos-apagar.desktop" metadata::trusted true 2>/dev/null || true
         fi
     done
