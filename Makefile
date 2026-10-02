@@ -54,6 +54,7 @@ GTK_LIBS   = $(shell pkg-config --libs gtk+-3.0)
 GUI_BIN = pawos-refugio-gui
 GUI_PRODUCTO_BIN = pawos-refugio-gui-producto
 VACUNAS_GUI_BIN = pawos-vacunas-gui
+MONITOR_GUI_BIN = pawos-monitor-gui
 
 gui: src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c
 	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
@@ -77,5 +78,11 @@ vacunas-gui: src/main_vacunas_gui.c src/db/db.c
 
 clean-vacunas-gui:
 	rm -f $(VACUNAS_GUI_BIN)
+
+monitor-gui: src/main_monitor_gui.c
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_monitor_gui.c -o $(MONITOR_GUI_BIN) $(GTK_LIBS)
+
+clean-monitor-gui:
+	rm -f $(MONITOR_GUI_BIN)
 
 .PHONY: gui gui-producto clean-gui
