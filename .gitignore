@@ -36,3 +36,4 @@ live-build-config/chroot.packages*
 pawos-refugio-gui-producto
 *.deb
 deb-build/
+/pawos-vacunas-gui

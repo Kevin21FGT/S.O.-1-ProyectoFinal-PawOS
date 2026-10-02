@@ -1029,6 +1029,27 @@ static void on_ver_pendientes_vacunas_clicked(GtkButton *boton, gpointer datos) 
     cargar_vacunas(ctx);
 }
 
+/* Valida que una fecha tenga el formato estricto AAAA-MM-DD y sea una
+ * fecha real (dia valido para ese mes/anio, incluyendo anios
+ * bisiestos). Necesario porque vacuna_pendientes() en db.c compara
+ * fechas como texto, y eso solo funciona bien si todas las fechas
+ * guardadas usan este mismo formato. */
+static gboolean fecha_valida(const char *fecha) {
+    if (!fecha || strlen(fecha) != 10) return FALSE;
+    if (fecha[4] != '-' || fecha[7] != '-') return FALSE;
+    int anio, mes, dia;
+    if (sscanf(fecha, "%4d-%2d-%2d", &anio, &mes, &dia) != 3) return FALSE;
+    if (mes < 1 || mes > 12) return FALSE;
+    if (dia < 1 || dia > 31) return FALSE;
+    static const int dias_por_mes[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    int max_dia = dias_por_mes[mes - 1];
+    if (mes == 2) {
+        gboolean bisiesto = (anio % 4 == 0 && (anio % 100 != 0 || anio % 400 == 0));
+        if (bisiesto) max_dia = 29;
+    }
+    return dia <= max_dia;
+}
+
 static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     ContextoVacunas *ctx = (ContextoVacunas *)datos;
@@ -1087,7 +1108,28 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     gtk_container_add(GTK_CONTAINER(area), cuadricula);
     mostrar_con_fundido(dialogo);
 
-    if (gtk_dialog_run(GTK_DIALOG(dialogo)) == GTK_RESPONSE_OK) {
+    gboolean datos_vacuna_ok = FALSE;
+    for (;;) {
+        if (gtk_dialog_run(GTK_DIALOG(dialogo)) != GTK_RESPONSE_OK) break;
+        const char *fapl_txt = gtk_entry_get_text(GTK_ENTRY(e_aplic));
+        const char *fprox_txt = gtk_entry_get_text(GTK_ENTRY(e_prox));
+        if (!fecha_valida(fapl_txt)) {
+            mostrar_mensaje(GTK_WINDOW(dialogo),
+                "La fecha de aplicacion debe tener el formato AAAA-MM-DD y ser una fecha valida (ej: 2026-10-16).",
+                TRUE);
+            continue;
+        }
+        if (fprox_txt[0] != '\0' && !fecha_valida(fprox_txt)) {
+            mostrar_mensaje(GTK_WINDOW(dialogo),
+                "La proxima dosis debe tener el formato AAAA-MM-DD, o dejarse vacia si no aplica.",
+                TRUE);
+            continue;
+        }
+        datos_vacuna_ok = TRUE;
+        break;
+    }
+
+    if (datos_vacuna_ok) {
         Vacuna v;
         memset(&v, 0, sizeof(v));
         v.mascota_id = mascota_id;
