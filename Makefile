@@ -55,6 +55,7 @@ GUI_BIN = pawos-refugio-gui
 GUI_PRODUCTO_BIN = pawos-refugio-gui-producto
 VACUNAS_GUI_BIN = pawos-vacunas-gui
 MONITOR_GUI_BIN = pawos-monitor-gui
+PORTAL_CLIENTES_BIN = pawos-portal-clientes
 
 gui: src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c
 	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
@@ -84,5 +85,11 @@ monitor-gui: src/main_monitor_gui.c
 
 clean-monitor-gui:
 	rm -f $(MONITOR_GUI_BIN)
+
+portal-clientes: src/main_portal_clientes.c src/db/db.c
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_portal_clientes.c src/db/db.c -o $(PORTAL_CLIENTES_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
+
+clean-portal-clientes:
+	rm -f $(PORTAL_CLIENTES_BIN)
 
 .PHONY: gui gui-producto clean-gui
