@@ -512,8 +512,10 @@ static gboolean recorte_on_motion(GtkWidget *widget, GdkEventMotion *evento, gpo
     if (r->modo == MODO_NINGUNO) return FALSE;
 
     double px = evento->x, py = evento->y;
-    if (px < 0) px = 0; if (px > r->ancho_img) px = r->ancho_img;
-    if (py < 0) py = 0; if (py > r->alto_img) py = r->alto_img;
+    if (px < 0) px = 0;
+    if (px > r->ancho_img) px = r->ancho_img;
+    if (py < 0) py = 0;
+    if (py > r->alto_img) py = r->alto_img;
 
     switch (r->modo) {
         case MODO_DIBUJANDO:

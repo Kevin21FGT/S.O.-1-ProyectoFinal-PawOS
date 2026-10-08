@@ -56,6 +56,7 @@ GUI_PRODUCTO_BIN = pawos-refugio-gui-producto
 VACUNAS_GUI_BIN = pawos-vacunas-gui
 MONITOR_GUI_BIN = pawos-monitor-gui
 PORTAL_CLIENTES_BIN = pawos-portal-clientes
+ARCHIVOS_GUI_BIN = pawos-archivos-gui
 
 gui: src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c
 	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
@@ -91,5 +92,12 @@ portal-clientes: src/main_portal_clientes.c src/db/db.c
 
 clean-portal-clientes:
 	rm -f $(PORTAL_CLIENTES_BIN)
+
+archivos-gui: src/main_archivos_gui.c src/archivos/archivos.c src/integridad/integridad.c src/db/db.c src/integridad/checksum.asm
+	nasm -f elf64 src/integridad/checksum.asm -o src/integridad/checksum.o
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_archivos_gui.c src/archivos/archivos.c src/integridad/integridad.c src/db/db.c src/integridad/checksum.o -o $(ARCHIVOS_GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
+
+clean-archivos-gui:
+	rm -f $(ARCHIVOS_GUI_BIN)
 
 .PHONY: gui gui-producto clean-gui
