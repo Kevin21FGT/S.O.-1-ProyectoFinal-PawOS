@@ -88,6 +88,17 @@ typedef struct {
     RolCliente rol;
 } Cliente;
 
+/* Solicitud de adopcion hecha por un Cliente desde el Portal de Clientes.
+ * estado: Pendiente | Aprobada | Rechazada (lo cambia el personal). */
+typedef struct {
+    int  id;
+    int  mascota_id;
+    int  cliente_id;
+    char fecha[16];     /* YYYY-MM-DD */
+    char estado[20];
+    char mensaje[501];  /* mensaje opcional del Cliente */
+} SolicitudAdopcion;
+
 /* ---------- Ciclo de vida ---------- */
 int  db_init(const char *ruta);
 void db_close(void);
@@ -107,12 +118,16 @@ int  cliente_actualizar_rol(int id, RolCliente nuevo_rol);
 const char *cliente_rol_nombre(RolCliente rol);
 int  cliente_listar(Cliente **out, int *n);
 int  cliente_guardar_foto(int id, const char *foto_base64);
+int  cliente_actualizar_telefono(int id, const char *telefono);
 int  cliente_obtener_foto(int id, char **out_foto_base64); /* out_foto_base64: liberar con free() */
 int  respaldo_existe_nombre(const char *nombre); /* 1 existe, 0 no, -1 error */
 int  respaldo_borrar_nombre(const char *nombre); /* borra las filas de un respaldo por nombre */
 int  respaldo_listar_nombres(char ***out, int *n); /* nombres de respaldos en la nube; liberar con free() */
 int  respaldo_guardar(const char *fecha, const char *nombre, const char *tabla, const char *contenido); /* copia de una tabla (CSV) en la tabla remota respaldos */
 int  mascota_listar_disponibles(Mascota **out, int *n);
+int  solicitud_crear(int mascota_id, int cliente_id, const char *fecha, const char *mensaje);
+int  solicitud_listar_cliente(int cliente_id, SolicitudAdopcion **out, int *n); /* liberar con free() */
+int  solicitud_existe_activa(int mascota_id, int cliente_id); /* 1 si, 0 no, -1 error */
 
 /* ---------- Mascotas ---------- */
 int  mascota_agregar(const Mascota *m);

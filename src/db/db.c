@@ -848,6 +848,137 @@ int respaldo_borrar_nombre(const char *nombre) {
     return ok;
 }
 
+/* ---------- Solicitudes de adopcion (SQL Server) ---------- */
+
+/* Crea una solicitud en estado Pendiente. 0 = ok. */
+int solicitud_crear(int mascota_id, int cliente_id, const char *fecha, const char *mensaje) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "INSERT INTO solicitudes_adopcion (mascota_id, cliente_id, fecha, estado, mensaje) "
+                      "VALUES (?,?,?,'Pendiente',?);";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER mid = mascota_id, cid = cliente_id;
+    SQLLEN len_mid = 0, len_cid = 0, len_fecha = SQL_NTS, len_msg = SQL_NTS;
+    const char *msg = mensaje ? mensaje : "";
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &mid, 0, &len_mid);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &cid, 0, &len_cid);
+    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 20, 0, (SQLPOINTER)fecha, 0, &len_fecha);
+    SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 500, 0, (SQLPOINTER)msg, 0, &len_msg);
+    int ok = SQL_SUCCEEDED(SQLExecute(hstmt)) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
+}
+
+/* Lista las solicitudes de un Cliente (la mas reciente primero). */
+int solicitud_listar_cliente(int cliente_id, SolicitudAdopcion **out, int *n) {
+    *out = NULL;
+    *n = 0;
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "SELECT id, mascota_id, cliente_id, fecha, estado, ISNULL(mensaje, '') "
+                      "FROM solicitudes_adopcion WHERE cliente_id = ? ORDER BY id DESC;";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER cid = cliente_id;
+    SQLLEN len_cid = 0;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &cid, 0, &len_cid);
+    if (!SQL_SUCCEEDED(SQLExecute(hstmt))) {
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    SolicitudAdopcion *lista = NULL;
+    int cuenta = 0, capacidad = 0;
+    while (SQL_SUCCEEDED(SQLFetch(hstmt))) {
+        SolicitudAdopcion s;
+        memset(&s, 0, sizeof(s));
+        SQLINTEGER v_id = 0, v_mid = 0, v_cid = 0;
+        SQLLEN ind = 0;
+        SQLGetData(hstmt, 1, SQL_C_SLONG, &v_id, 0, &ind);
+        SQLGetData(hstmt, 2, SQL_C_SLONG, &v_mid, 0, &ind);
+        SQLGetData(hstmt, 3, SQL_C_SLONG, &v_cid, 0, &ind);
+        SQLGetData(hstmt, 4, SQL_C_CHAR, s.fecha, sizeof(s.fecha), &ind);
+        SQLGetData(hstmt, 5, SQL_C_CHAR, s.estado, sizeof(s.estado), &ind);
+        SQLGetData(hstmt, 6, SQL_C_CHAR, s.mensaje, sizeof(s.mensaje), &ind);
+        s.id = (int)v_id;
+        s.mascota_id = (int)v_mid;
+        s.cliente_id = (int)v_cid;
+        if (cuenta >= capacidad) {
+            capacidad = capacidad ? capacidad * 2 : 8;
+            SolicitudAdopcion *nueva = realloc(lista, (size_t)capacidad * sizeof(SolicitudAdopcion));
+            if (!nueva) break;
+            lista = nueva;
+        }
+        lista[cuenta++] = s;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    *out = lista;
+    *n = cuenta;
+    return 0;
+}
+
+/* 1 si el Cliente ya tiene una solicitud Pendiente o Aprobada para esa
+ * mascota, 0 si no, -1 si no se pudo consultar. */
+int solicitud_existe_activa(int mascota_id, int cliente_id) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "SELECT COUNT(*) FROM solicitudes_adopcion "
+                      "WHERE mascota_id = ? AND cliente_id = ? AND estado IN ('Pendiente','Aprobada');";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER mid = mascota_id, cid = cliente_id;
+    SQLLEN len_mid = 0, len_cid = 0;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &mid, 0, &len_mid);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &cid, 0, &len_cid);
+    int resultado = -1;
+    if (SQL_SUCCEEDED(SQLExecute(hstmt)) && SQL_SUCCEEDED(SQLFetch(hstmt))) {
+        SQLINTEGER cuenta = 0;
+        SQLLEN ind = 0;
+        if (SQL_SUCCEEDED(SQLGetData(hstmt, 1, SQL_C_SLONG, &cuenta, 0, &ind)))
+            resultado = (cuenta > 0) ? 1 : 0;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return resultado;
+}
+
+/* Cambia el telefono de un Cliente (tabla clientes en SmarterASP). 0 = ok. */
+int cliente_actualizar_telefono(int id, const char *telefono) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "UPDATE clientes SET telefono = ? WHERE id = ?;";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER cid = id;
+    SQLLEN len_tel = SQL_NTS, len_id = 0;
+    const char *tel = telefono ? telefono : "";
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 32, 0, (SQLPOINTER)tel, 0, &len_tel);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0, &cid, 0, &len_id);
+    int ok = SQL_SUCCEEDED(SQLExecute(hstmt)) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
+}
+
 int mascota_listar_disponibles(Mascota **out, int *n) {
     SQLHENV henv; SQLHDBC hdbc;
     if (api_conectar(&henv, &hdbc) != 0) return -1;
