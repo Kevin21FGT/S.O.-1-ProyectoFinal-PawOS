@@ -108,7 +108,10 @@ const char *cliente_rol_nombre(RolCliente rol);
 int  cliente_listar(Cliente **out, int *n);
 int  cliente_guardar_foto(int id, const char *foto_base64);
 int  cliente_obtener_foto(int id, char **out_foto_base64); /* out_foto_base64: liberar con free() */
-int  respaldo_guardar(const char *fecha, const char *tabla, const char *contenido); /* copia de una tabla (CSV) en la tabla remota respaldos */
+int  respaldo_existe_nombre(const char *nombre); /* 1 existe, 0 no, -1 error */
+int  respaldo_borrar_nombre(const char *nombre); /* borra las filas de un respaldo por nombre */
+int  respaldo_listar_nombres(char ***out, int *n); /* nombres de respaldos en la nube; liberar con free() */
+int  respaldo_guardar(const char *fecha, const char *nombre, const char *tabla, const char *contenido); /* copia de una tabla (CSV) en la tabla remota respaldos */
 int  mascota_listar_disponibles(Mascota **out, int *n);
 
 /* ---------- Mascotas ---------- */

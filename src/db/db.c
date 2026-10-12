@@ -740,7 +740,7 @@ int cliente_obtener_foto(int id, char **out_foto_base64) {
  * Guarda el contenido (texto CSV) de una tabla en la tabla remota
  * "respaldos". "fecha" es el sello de ese respaldo (todas las tablas
  * de un mismo respaldo comparten la misma fecha). */
-int respaldo_guardar(const char *fecha, const char *tabla, const char *contenido) {
+int respaldo_guardar(const char *fecha, const char *nombre, const char *tabla, const char *contenido) {
     SQLHENV henv; SQLHDBC hdbc;
     if (api_conectar(&henv, &hdbc) != 0) return -1;
     SQLHSTMT hstmt;
@@ -748,13 +748,100 @@ int respaldo_guardar(const char *fecha, const char *tabla, const char *contenido
         api_desconectar(henv, hdbc);
         return -1;
     }
-    const char *sql = "INSERT INTO respaldos (fecha, tabla, contenido) VALUES (?,?,?);";
+    const char *sql = "INSERT INTO respaldos (fecha, nombre, tabla, contenido) VALUES (?,?,?,?);";
     SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
     const char *texto = contenido ? contenido : "";
-    SQLLEN len_fecha = SQL_NTS, len_tabla = SQL_NTS, len_texto = SQL_NTS;
+    SQLLEN len_fecha = SQL_NTS, len_nombre = SQL_NTS, len_tabla = SQL_NTS, len_texto = SQL_NTS;
     SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 20, 0, (SQLPOINTER)fecha, 0, &len_fecha);
-    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 40, 0, (SQLPOINTER)tabla, 0, &len_tabla);
-    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_LONGVARCHAR, (SQLULEN)strlen(texto), 0, (SQLPOINTER)texto, 0, &len_texto);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 100, 0, (SQLPOINTER)nombre, 0, &len_nombre);
+    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 40, 0, (SQLPOINTER)tabla, 0, &len_tabla);
+    SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_LONGVARCHAR, (SQLULEN)strlen(texto), 0, (SQLPOINTER)texto, 0, &len_texto);
+    int ok = SQL_SUCCEEDED(SQLExecute(hstmt)) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
+}
+
+/* Devuelve 1 si ya existe un respaldo con ese nombre en la nube,
+ * 0 si no existe, -1 si no se pudo consultar. */
+int respaldo_existe_nombre(const char *nombre) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "SELECT COUNT(*) FROM respaldos WHERE nombre = ?;";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLLEN len_nombre = SQL_NTS;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 100, 0, (SQLPOINTER)nombre, 0, &len_nombre);
+    int resultado = -1;
+    if (SQL_SUCCEEDED(SQLExecute(hstmt)) && SQL_SUCCEEDED(SQLFetch(hstmt))) {
+        SQLINTEGER cuenta = 0;
+        SQLLEN ind = 0;
+        if (SQL_SUCCEEDED(SQLGetData(hstmt, 1, SQL_C_SLONG, &cuenta, 0, &ind)))
+            resultado = (cuenta > 0) ? 1 : 0;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return resultado;
+}
+
+/* Lista los nombres de respaldos que hay en la nube (sin repetir).
+ * out: arreglo de cadenas (liberar cada una y el arreglo con free()).
+ * Devuelve 0 si salio bien, -1 si no se pudo consultar. */
+int respaldo_listar_nombres(char ***out, int *n) {
+    *out = NULL;
+    *n = 0;
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "SELECT DISTINCT nombre FROM respaldos WHERE nombre IS NOT NULL;";
+    if (!SQL_SUCCEEDED(SQLExecDirect(hstmt, (SQLCHAR *)sql, SQL_NTS))) {
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    char **lista = NULL;
+    int cuenta = 0, capacidad = 0;
+    while (SQL_SUCCEEDED(SQLFetch(hstmt))) {
+        char buf[256];
+        SQLLEN ind = 0;
+        if (!SQL_SUCCEEDED(SQLGetData(hstmt, 1, SQL_C_CHAR, buf, sizeof(buf), &ind))) continue;
+        if (ind == SQL_NULL_DATA) continue;
+        if (cuenta >= capacidad) {
+            capacidad = capacidad ? capacidad * 2 : 8;
+            char **nueva = realloc(lista, (size_t)capacidad * sizeof(char *));
+            if (!nueva) break;
+            lista = nueva;
+        }
+        lista[cuenta++] = strdup(buf);
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    *out = lista;
+    *n = cuenta;
+    return 0;
+}
+
+/* Borra de la nube todas las filas de un respaldo (por nombre). 0 = ok. */
+int respaldo_borrar_nombre(const char *nombre) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "DELETE FROM respaldos WHERE nombre = ?;";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLLEN len_nombre = SQL_NTS;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 100, 0, (SQLPOINTER)nombre, 0, &len_nombre);
     int ok = SQL_SUCCEEDED(SQLExecute(hstmt)) ? 0 : -1;
     SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
     api_desconectar(henv, hdbc);
