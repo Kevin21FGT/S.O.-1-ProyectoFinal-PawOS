@@ -17,6 +17,7 @@
 #include <gtk/gtk.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "db/db.h"
 #include "archivos/archivos.h"
 #include "integridad/integridad.h"
@@ -347,15 +348,211 @@ static void on_eliminar_clicked(GtkButton *btn, gpointer datos) {
 
 /* ---------- Respaldo e integridad ---------- */
 
-static void on_respaldar_clicked(GtkButton *btn, gpointer datos) {
-    (void)btn;
-    ContextoApp *ctx = datos;
-    if (archivos_respaldar_bd_auto() == 0) {
-        cargar_categorias(ctx);
-        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Respaldo creado. Lo encuentras en la categoria Backups.", FALSE);
-    } else {
-        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo crear el respaldo.", TRUE);
+/* Respaldo de los datos del SQL Server (SmarterASP): cada tabla se
+ * convierte a CSV, se guarda un archivo por tabla en la categoria
+ * Backups y, ademas, una copia en la tabla "respaldos" del propio
+ * SQL Server. Las contrasenas y fotos de clientes NO se incluyen. */
+
+static void csv_texto(GString *g, const char *t) {
+    g_string_append_c(g, '"');
+    for (const char *p = t; *p; p++) {
+        if (*p == '"') g_string_append(g, "\"\"");
+        else g_string_append_c(g, *p);
     }
+    g_string_append_c(g, '"');
+}
+
+static void csv_decimal(GString *g, double valor) {
+    char buf[G_ASCII_DTOSTR_BUF_SIZE];
+    g_ascii_formatd(buf, sizeof(buf), "%.2f", valor);
+    g_string_append(g, buf);
+}
+
+static GString *csv_mascotas(void) {
+    Mascota *l = NULL; int n = 0;
+    if (mascota_listar(&l, &n) != 0) return NULL;
+    GString *g = g_string_new("id,nombre,especie,raza,edad,estado,fecha_ingreso\n");
+    for (int i = 0; i < n; i++) {
+        g_string_append_printf(g, "%d,", l[i].id);
+        csv_texto(g, l[i].nombre); g_string_append_c(g, ',');
+        csv_texto(g, l[i].especie); g_string_append_c(g, ',');
+        csv_texto(g, l[i].raza); g_string_append_c(g, ',');
+        g_string_append_printf(g, "%d,", l[i].edad);
+        csv_texto(g, l[i].estado); g_string_append_c(g, ',');
+        csv_texto(g, l[i].fecha_ingreso); g_string_append_c(g, '\n');
+    }
+    free(l);
+    return g;
+}
+
+static GString *csv_vacunas(void) {
+    Vacuna *l = NULL; int n = 0;
+    if (vacuna_listar(&l, &n) != 0) return NULL;
+    GString *g = g_string_new("id,mascota_id,nombre_vacuna,fecha_aplicacion,fecha_proxima,observaciones,cliente_id\n");
+    for (int i = 0; i < n; i++) {
+        g_string_append_printf(g, "%d,%d,", l[i].id, l[i].mascota_id);
+        csv_texto(g, l[i].nombre_vacuna); g_string_append_c(g, ',');
+        csv_texto(g, l[i].fecha_aplicacion); g_string_append_c(g, ',');
+        csv_texto(g, l[i].fecha_proxima); g_string_append_c(g, ',');
+        csv_texto(g, l[i].observaciones);
+        g_string_append_printf(g, ",%d\n", l[i].cliente_id);
+    }
+    free(l);
+    return g;
+}
+
+static GString *csv_adopciones(void) {
+    Adopcion *l = NULL; int n = 0;
+    if (adopcion_listar(&l, &n) != 0) return NULL;
+    GString *g = g_string_new("id,mascota_id,adoptante_nombre,adoptante_contacto,fecha_adopcion\n");
+    for (int i = 0; i < n; i++) {
+        g_string_append_printf(g, "%d,%d,", l[i].id, l[i].mascota_id);
+        csv_texto(g, l[i].adoptante_nombre); g_string_append_c(g, ',');
+        csv_texto(g, l[i].adoptante_contacto); g_string_append_c(g, ',');
+        csv_texto(g, l[i].fecha_adopcion); g_string_append_c(g, '\n');
+    }
+    free(l);
+    return g;
+}
+
+static GString *csv_donantes(void) {
+    Donante *l = NULL; int n = 0;
+    if (donante_listar(&l, &n) != 0) return NULL;
+    GString *g = g_string_new("id,nombre,contacto,monto,fecha\n");
+    for (int i = 0; i < n; i++) {
+        g_string_append_printf(g, "%d,", l[i].id);
+        csv_texto(g, l[i].nombre); g_string_append_c(g, ',');
+        csv_texto(g, l[i].contacto); g_string_append_c(g, ',');
+        csv_decimal(g, l[i].monto); g_string_append_c(g, ',');
+        csv_texto(g, l[i].fecha); g_string_append_c(g, '\n');
+    }
+    free(l);
+    return g;
+}
+
+static GString *csv_alertas(void) {
+    Alerta *l = NULL; int n = 0;
+    if (alerta_listar(&l, &n) != 0) return NULL;
+    GString *g = g_string_new("id,animal_id,tipo,detalle,valor,fecha_hora,atendida\n");
+    for (int i = 0; i < n; i++) {
+        g_string_append_printf(g, "%d,", l[i].id);
+        csv_texto(g, l[i].animal_id); g_string_append_c(g, ',');
+        csv_texto(g, l[i].tipo); g_string_append_c(g, ',');
+        csv_texto(g, l[i].detalle); g_string_append_c(g, ',');
+        csv_decimal(g, l[i].valor); g_string_append_c(g, ',');
+        csv_texto(g, l[i].fecha_hora);
+        g_string_append_printf(g, ",%d\n", l[i].atendida);
+    }
+    free(l);
+    return g;
+}
+
+static GString *csv_clientes(void) {
+    Cliente *l = NULL; int n = 0;
+    if (cliente_listar(&l, &n) != 0) return NULL;
+    GString *g = g_string_new("id,correo,nombre,telefono,rol\n");
+    for (int i = 0; i < n; i++) {
+        g_string_append_printf(g, "%d,", l[i].id);
+        csv_texto(g, l[i].correo); g_string_append_c(g, ',');
+        csv_texto(g, l[i].nombre); g_string_append_c(g, ',');
+        csv_texto(g, l[i].telefono);
+        g_string_append_printf(g, ",%d\n", (int)l[i].rol);
+    }
+    free(l);
+    return g;
+}
+
+static GString *csv_notas(void) {
+    NotaVeterinario *l = NULL; int n = 0;
+    if (nota_veterinario_listar(&l, &n) != 0) return NULL;
+    GString *g = g_string_new("id,mascota_id,nota,autor,fecha\n");
+    for (int i = 0; i < n; i++) {
+        g_string_append_printf(g, "%d,%d,", l[i].id, l[i].mascota_id);
+        csv_texto(g, l[i].nota); g_string_append_c(g, ',');
+        csv_texto(g, l[i].autor); g_string_append_c(g, ',');
+        csv_texto(g, l[i].fecha); g_string_append_c(g, '\n');
+    }
+    free(l);
+    return g;
+}
+
+typedef GString *(*FuncionCsv)(void);
+typedef struct {
+    const char *tabla;
+    FuncionCsv  generar;
+} TablaRespaldo;
+
+static const TablaRespaldo TABLAS_RESPALDO[] = {
+    { "mascotas", csv_mascotas },
+    { "vacunas", csv_vacunas },
+    { "adopciones", csv_adopciones },
+    { "donantes", csv_donantes },
+    { "alertas_sensores", csv_alertas },
+    { "clientes", csv_clientes },
+    { "notas_veterinario", csv_notas }
+};
+#define N_TABLAS_RESPALDO ((int)(sizeof(TABLAS_RESPALDO) / sizeof(TABLAS_RESPALDO[0])))
+
+static void on_respaldar_clicked(GtkButton *btn, gpointer datos) {
+    ContextoApp *ctx = datos;
+    gtk_widget_set_sensitive(GTK_WIDGET(btn), FALSE);
+    while (gtk_events_pending()) gtk_main_iteration();
+
+    char sello[32], fecha_texto[24];
+    time_t t = time(NULL);
+    struct tm tmv;
+    localtime_r(&t, &tmv);
+    strftime(sello, sizeof(sello), "%Y%m%d_%H%M%S", &tmv);
+    strftime(fecha_texto, sizeof(fecha_texto), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    /* 1. Leer todas las tablas del SQL Server. Si alguna falla, no se
+     * guarda nada a medias. */
+    GString *csvs[N_TABLAS_RESPALDO];
+    const char *fallo = NULL;
+    int leidas = 0;
+    for (int i = 0; i < N_TABLAS_RESPALDO; i++) {
+        csvs[i] = TABLAS_RESPALDO[i].generar();
+        if (!csvs[i]) { fallo = TABLAS_RESPALDO[i].tabla; break; }
+        leidas++;
+    }
+    if (fallo) {
+        for (int i = 0; i < leidas; i++) g_string_free(csvs[i], TRUE);
+        gchar *msg = g_strdup_printf(
+            "No se pudo leer la tabla \"%s\" del SQL Server. Revisa la conexion e intenta de nuevo.", fallo);
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), msg, TRUE);
+        g_free(msg);
+        gtk_widget_set_sensitive(GTK_WIDGET(btn), TRUE);
+        return;
+    }
+
+    /* 2. CSV local en la categoria Backups + copia en SmarterASP. */
+    int locales = 0, remotos = 0;
+    for (int i = 0; i < N_TABLAS_RESPALDO; i++) {
+        gchar *nombre = g_strdup_printf("respaldo_%s_%s.csv", sello, TABLAS_RESPALDO[i].tabla);
+        gchar *ruta = g_build_filename(archivos_ruta_base(), "backups", nombre, NULL);
+        if (g_file_set_contents(ruta, csvs[i]->str, (gssize)csvs[i]->len, NULL)) locales++;
+        g_free(ruta);
+        g_free(nombre);
+        if (respaldo_guardar(fecha_texto, TABLAS_RESPALDO[i].tabla, csvs[i]->str) == 0) remotos++;
+        g_string_free(csvs[i], TRUE);
+    }
+
+    /* 3. Copia del SQLite local (usuarios del personal), como antes. */
+    int sqlite_ok = (archivos_respaldar_bd_auto() == 0);
+
+    cargar_categorias(ctx);
+
+    GString *msg = g_string_new("Respaldo terminado.\n\n");
+    g_string_append_printf(msg, "- Archivos CSV en la carpeta Backups: %d de %d\n", locales, N_TABLAS_RESPALDO);
+    g_string_append_printf(msg, "- Copia en SmarterASP (tabla respaldos): %d de %d\n", remotos, N_TABLAS_RESPALDO);
+    g_string_append_printf(msg, "- Base local de usuarios (SQLite): %s", sqlite_ok ? "copiada" : "no se pudo copiar");
+    if (remotos < N_TABLAS_RESPALDO) {
+        g_string_append(msg, "\n\nSi la copia en SmarterASP salio en 0, revisa que exista la tabla \"respaldos\".");
+    }
+    mostrar_mensaje(GTK_WINDOW(ctx->ventana), msg->str,
+        locales < N_TABLAS_RESPALDO && remotos < N_TABLAS_RESPALDO);
+    g_string_free(msg, TRUE);
+    gtk_widget_set_sensitive(GTK_WIDGET(btn), TRUE);
 }
 
 static void poner_estado_integridad(ContextoApp *ctx, const char *texto, const char *color) {
@@ -545,7 +742,7 @@ static void construir_ventana(ContextoApp *ctx) {
     gtk_box_pack_start(GTK_BOX(tarjeta_int), btn_aceptar, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(fila_inferior), tarjeta_int, TRUE, TRUE, 0);
 
-    GtkWidget *btn_respaldar = gtk_button_new_with_label("Respaldar base de datos ahora");
+    GtkWidget *btn_respaldar = gtk_button_new_with_label("Respaldar datos ahora");
     gtk_style_context_add_class(gtk_widget_get_style_context(btn_respaldar), "pawos-accion");
     g_signal_connect(btn_respaldar, "clicked", G_CALLBACK(on_respaldar_clicked), ctx);
     gtk_box_pack_start(GTK_BOX(fila_inferior), btn_respaldar, FALSE, FALSE, 0);

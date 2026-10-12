@@ -736,6 +736,31 @@ int cliente_obtener_foto(int id, char **out_foto_base64) {
     return ok;
 }
 
+/* ---------- Respaldos en SQL Server ----------
+ * Guarda el contenido (texto CSV) de una tabla en la tabla remota
+ * "respaldos". "fecha" es el sello de ese respaldo (todas las tablas
+ * de un mismo respaldo comparten la misma fecha). */
+int respaldo_guardar(const char *fecha, const char *tabla, const char *contenido) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "INSERT INTO respaldos (fecha, tabla, contenido) VALUES (?,?,?);";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    const char *texto = contenido ? contenido : "";
+    SQLLEN len_fecha = SQL_NTS, len_tabla = SQL_NTS, len_texto = SQL_NTS;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 20, 0, (SQLPOINTER)fecha, 0, &len_fecha);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 40, 0, (SQLPOINTER)tabla, 0, &len_tabla);
+    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_LONGVARCHAR, (SQLULEN)strlen(texto), 0, (SQLPOINTER)texto, 0, &len_texto);
+    int ok = SQL_SUCCEEDED(SQLExecute(hstmt)) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
+}
+
 int mascota_listar_disponibles(Mascota **out, int *n) {
     SQLHENV henv; SQLHDBC hdbc;
     if (api_conectar(&henv, &hdbc) != 0) return -1;
