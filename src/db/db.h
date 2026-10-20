@@ -99,6 +99,21 @@ typedef struct {
     char mensaje[501];  /* mensaje opcional del Cliente */
 } SolicitudAdopcion;
 
+/* Solicitud con los nombres ya resueltos (mascota y cliente), para la
+ * pantalla del personal. */
+typedef struct {
+    int  id;
+    int  mascota_id;
+    char mascota_nombre[64];
+    int  cliente_id;
+    char cliente_nombre[64];
+    char cliente_correo[128];
+    char cliente_telefono[32];
+    char fecha[16];
+    char estado[20];     /* Pendiente | Aprobada | Rechazada */
+    char mensaje[501];
+} SolicitudInfo;
+
 /* ---------- Ciclo de vida ---------- */
 int  db_init(const char *ruta);
 void db_close(void);
@@ -128,6 +143,8 @@ int  mascota_listar_disponibles(Mascota **out, int *n);
 int  solicitud_crear(int mascota_id, int cliente_id, const char *fecha, const char *mensaje);
 int  solicitud_listar_cliente(int cliente_id, SolicitudAdopcion **out, int *n); /* liberar con free() */
 int  solicitud_existe_activa(int mascota_id, int cliente_id); /* 1 si, 0 no, -1 error */
+int  solicitud_listar_todas(SolicitudInfo **out, int *n); /* pendientes primero; liberar con free() */
+int  solicitud_resolver(int id, int mascota_id, int aprobar); /* 1 aprueba (mascota -> en_proceso), 0 rechaza; 0 = ok */
 
 /* ---------- Mascotas ---------- */
 int  mascota_agregar(const Mascota *m);
@@ -135,6 +152,10 @@ int  mascota_listar(Mascota **out, int *n);
 int  mascota_actualizar_estado(int id, const char *nuevo_estado);
 int  mascota_eliminar(int id);
 int  mascota_buscar_por_id(int id, Mascota *out);
+/* Foto de la mascota: JPEG en base64 (columna foto_base64, SQL Server). */
+int  mascota_guardar_foto(int id, const char *foto_base64);
+int  mascota_obtener_foto(int id, char **out_foto_base64); /* liberar con free(); "" si no tiene */
+int  mascota_ultimo_id(const char *nombre, const char *fecha_ingreso, int *id_out);
 
 /* ---------- Vacunas ---------- */
 int  vacuna_agregar(const Vacuna *v);

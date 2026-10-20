@@ -48,6 +48,38 @@ static int api_leer_password_remota(char *out, size_t out_len) {
     return 0;
 }
 
+/* Lee ~/.pawos_db_config (opcional). Si falta o no trae una clave, se usa
+ * el valor por defecto de arriba (#define API_SQL_*). */
+static void api_leer_config_remota(char *srv, size_t ns, char *puerto, size_t np,
+                                   char *base, size_t nb, char *usr, size_t nu) {
+    snprintf(srv, ns, "%s", API_SQL_SERVIDOR);
+    snprintf(puerto, np, "%s", API_SQL_PUERTO);
+    snprintf(base, nb, "%s", API_SQL_BASE);
+    snprintf(usr, nu, "%s", API_SQL_USUARIO);
+
+    const char *home = getenv("HOME");
+    char ruta[256];
+    snprintf(ruta, sizeof(ruta), "%s/.pawos_db_config", home ? home : ".");
+    FILE *f = fopen(ruta, "r");
+    if (!f) return;
+    char linea[256];
+    while (fgets(linea, sizeof(linea), f)) {
+        linea[strcspn(linea, "\r\n")] = '\0';
+        if (linea[0] == '#') continue;
+        char *eq = strchr(linea, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        const char *clave = linea;
+        const char *valor = eq + 1;
+        if (valor[0] == '\0') continue;
+        if      (strcmp(clave, "SERVIDOR") == 0) snprintf(srv, ns, "%s", valor);
+        else if (strcmp(clave, "PUERTO")   == 0) snprintf(puerto, np, "%s", valor);
+        else if (strcmp(clave, "BASE")     == 0) snprintf(base, nb, "%s", valor);
+        else if (strcmp(clave, "USUARIO")  == 0) snprintf(usr, nu, "%s", valor);
+    }
+    fclose(f);
+}
+
 static SQLHENV g_henv_remoto = NULL;
 static SQLHDBC  g_hdbc_remoto = NULL;
 static time_t   g_ultimo_uso_remoto = 0;
@@ -74,6 +106,29 @@ static int api_conectar(SQLHENV *out_henv, SQLHDBC *out_hdbc) {
         api_cerrar_conexion_remota();
     }
     if (g_hdbc_remoto != NULL) {
+        /* Si el servidor cerro la conexion guardada, descartarla para
+         * que se abra una nueva en vez de fallar en todas las consultas. */
+        SQLUINTEGER conexion_muerta = SQL_CD_FALSE;
+        if (SQL_SUCCEEDED(SQLGetConnectAttr(g_hdbc_remoto, SQL_ATTR_CONNECTION_DEAD,
+                                            &conexion_muerta, 0, NULL))
+            && conexion_muerta == SQL_CD_TRUE) {
+            api_cerrar_conexion_remota();
+        } else if ((ahora - g_ultimo_uso_remoto) > 10) {
+            /* Prueba barata: si no responde, la conexion guardada ya murio. */
+            SQLHSTMT h_ping;
+            int viva = 0;
+            if (SQLAllocHandle(SQL_HANDLE_STMT, g_hdbc_remoto, &h_ping) == SQL_SUCCESS) {
+                if (SQL_SUCCEEDED(SQLExecDirect(h_ping, (SQLCHAR *)"SELECT 1", SQL_NTS)))
+                    viva = 1;
+                SQLFreeHandle(SQL_HANDLE_STMT, h_ping);
+            }
+            if (!viva) {
+                fprintf(stderr, "[PawOS] conexion a la BD perdida, reconectando...\n");
+                api_cerrar_conexion_remota();
+            }
+        }
+    }
+    if (g_hdbc_remoto != NULL) {
         g_ultimo_uso_remoto = ahora;
         *out_henv = g_henv_remoto;
         *out_hdbc = g_hdbc_remoto;
@@ -84,9 +139,12 @@ static int api_conectar(SQLHENV *out_henv, SQLHDBC *out_hdbc) {
     if (api_leer_password_remota(pass, sizeof(pass)) != 0) return -1;
 
     char connstr[512];
+    char cfg_srv[128], cfg_puerto[16], cfg_base[128], cfg_usr[128];
+    api_leer_config_remota(cfg_srv, sizeof(cfg_srv), cfg_puerto, sizeof(cfg_puerto),
+                           cfg_base, sizeof(cfg_base), cfg_usr, sizeof(cfg_usr));
     snprintf(connstr, sizeof(connstr),
         "DRIVER={FreeTDS};SERVER=%s;PORT=%s;DATABASE=%s;UID=%s;PWD=%s;TDS_Version=7.4;",
-        API_SQL_SERVIDOR, API_SQL_PUERTO, API_SQL_BASE, API_SQL_USUARIO, pass);
+        cfg_srv, cfg_puerto, cfg_base, cfg_usr, pass);
 
     SQLHENV henv;
     if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv) != SQL_SUCCESS) return -1;
@@ -979,6 +1037,116 @@ int cliente_actualizar_telefono(int id, const char *telefono) {
     return ok;
 }
 
+/* Todas las solicitudes de adopcion con nombre de mascota y de cliente
+ * (las Pendientes primero, luego las demas, la mas reciente arriba). */
+int solicitud_listar_todas(SolicitudInfo **out, int *n) {
+    *out = NULL;
+    *n = 0;
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql =
+        "SELECT s.id, s.mascota_id, ISNULL(m.nombre,'(eliminada)'), s.cliente_id, "
+        "ISNULL(c.nombre,'(sin nombre)'), ISNULL(c.correo,''), ISNULL(c.telefono,''), "
+        "s.fecha, s.estado, ISNULL(s.mensaje,'') "
+        "FROM solicitudes_adopcion s "
+        "LEFT JOIN mascotas m ON m.id = s.mascota_id "
+        "LEFT JOIN clientes c ON c.id = s.cliente_id "
+        "ORDER BY CASE WHEN s.estado='Pendiente' THEN 0 ELSE 1 END, s.id DESC;";
+    if (!SQL_SUCCEEDED(SQLExecDirect(hstmt, (SQLCHAR *)sql, SQL_NTS))) {
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    SolicitudInfo *lista = NULL;
+    int cuenta = 0, capacidad = 0;
+    while (SQL_SUCCEEDED(SQLFetch(hstmt))) {
+        SolicitudInfo s;
+        memset(&s, 0, sizeof(s));
+        SQLINTEGER v_id = 0, v_mid = 0, v_cid = 0;
+        SQLLEN ind = 0;
+        SQLGetData(hstmt, 1, SQL_C_SLONG, &v_id, 0, &ind);
+        SQLGetData(hstmt, 2, SQL_C_SLONG, &v_mid, 0, &ind);
+        SQLGetData(hstmt, 3, SQL_C_CHAR, s.mascota_nombre, sizeof(s.mascota_nombre), &ind);
+        SQLGetData(hstmt, 4, SQL_C_SLONG, &v_cid, 0, &ind);
+        SQLGetData(hstmt, 5, SQL_C_CHAR, s.cliente_nombre, sizeof(s.cliente_nombre), &ind);
+        SQLGetData(hstmt, 6, SQL_C_CHAR, s.cliente_correo, sizeof(s.cliente_correo), &ind);
+        SQLGetData(hstmt, 7, SQL_C_CHAR, s.cliente_telefono, sizeof(s.cliente_telefono), &ind);
+        SQLGetData(hstmt, 8, SQL_C_CHAR, s.fecha, sizeof(s.fecha), &ind);
+        SQLGetData(hstmt, 9, SQL_C_CHAR, s.estado, sizeof(s.estado), &ind);
+        SQLGetData(hstmt, 10, SQL_C_CHAR, s.mensaje, sizeof(s.mensaje), &ind);
+        s.id = (int)v_id;
+        s.mascota_id = (int)v_mid;
+        s.cliente_id = (int)v_cid;
+        if (cuenta >= capacidad) {
+            capacidad = capacidad ? capacidad * 2 : 8;
+            SolicitudInfo *nueva = realloc(lista, (size_t)capacidad * sizeof(SolicitudInfo));
+            if (!nueva) break;
+            lista = nueva;
+        }
+        lista[cuenta++] = s;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    *out = lista;
+    *n = cuenta;
+    return 0;
+}
+
+/* Resuelve una solicitud PENDIENTE. aprobar=1: la marca Aprobada y pone
+ * la mascota en "en_proceso" (solo si estaba "disponible"); aprobar=0: la
+ * marca Rechazada. Una sola transaccion: si algo falla no cambia nada.
+ * 0 = ok, -1 = error o la solicitud/mascota ya habia cambiado. */
+int solicitud_resolver(int id, int mascota_id, int aprobar) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_OFF, 0);
+    int ok = -1;
+
+    SQLHSTMT h1;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &h1) == SQL_SUCCESS) {
+        SQLPrepare(h1, (SQLCHAR *)
+            "UPDATE solicitudes_adopcion SET estado=? WHERE id=? AND estado='Pendiente';", SQL_NTS);
+        const char *nuevo = aprobar ? "Aprobada" : "Rechazada";
+        SQLLEN len_estado = SQL_NTS;
+        SQLINTEGER id_val = id;
+        SQLBindParameter(h1, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 20, 0, (SQLPOINTER)nuevo, 0, &len_estado);
+        SQLBindParameter(h1, 2, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_val, 0, NULL);
+        SQLRETURN r = SQLExecute(h1);
+        SQLLEN filas = 0;
+        if (SQL_SUCCEEDED(r)) SQLRowCount(h1, &filas);
+        SQLFreeHandle(SQL_HANDLE_STMT, h1);
+
+        if (SQL_SUCCEEDED(r) && filas == 1) {
+            if (!aprobar) {
+                ok = 0;
+            } else {
+                SQLHSTMT h2;
+                if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &h2) == SQL_SUCCESS) {
+                    SQLPrepare(h2, (SQLCHAR *)
+                        "UPDATE mascotas SET estado='en_proceso' WHERE id=? AND estado='disponible';", SQL_NTS);
+                    SQLINTEGER mid_val = mascota_id;
+                    SQLBindParameter(h2, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &mid_val, 0, NULL);
+                    SQLRETURN r2 = SQLExecute(h2);
+                    SQLLEN filas2 = 0;
+                    if (SQL_SUCCEEDED(r2)) SQLRowCount(h2, &filas2);
+                    SQLFreeHandle(SQL_HANDLE_STMT, h2);
+                    if (SQL_SUCCEEDED(r2) && filas2 == 1) ok = 0;
+                }
+            }
+        }
+    }
+
+    SQLEndTran(SQL_HANDLE_DBC, hdbc, ok == 0 ? SQL_COMMIT : SQL_ROLLBACK);
+    SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
+    api_desconectar(henv, hdbc);
+    return ok;
+}
+
 int mascota_listar_disponibles(Mascota **out, int *n) {
     SQLHENV henv; SQLHDBC hdbc;
     if (api_conectar(&henv, &hdbc) != 0) return -1;
@@ -1140,6 +1308,102 @@ int mascota_buscar_por_id(int id, Mascota *out) {
     SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
     api_desconectar(henv, hdbc);
     return found;
+}
+
+/* ---------- Foto de la Mascota ----------
+ * Texto base64 (JPEG reducido) en mascotas.foto_base64, igual que la
+ * foto de perfil de clientes. Se pide por separado (no viaja en las
+ * listas) para que listar mascotas siga siendo rapido. */
+int mascota_guardar_foto(int id, const char *foto_base64) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "UPDATE mascotas SET foto_base64=? WHERE id=?;";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    const char *foto = foto_base64 ? foto_base64 : "";
+    SQLLEN len_foto = SQL_NTS;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_LONGVARCHAR, (SQLULEN)strlen(foto), 0, (SQLPOINTER)foto, 0, &len_foto);
+    SQLINTEGER id_val = id;
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_val, 0, NULL);
+    int ok = SQL_SUCCEEDED(SQLExecute(hstmt)) ? 0 : -1;
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
+}
+
+int mascota_obtener_foto(int id, char **out_foto_base64) {
+    *out_foto_base64 = NULL;
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    const char *sql = "SELECT foto_base64 FROM mascotas WHERE id=?;";
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER id_val = id;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_val, 0, NULL);
+    int ok = -1;
+    if (SQL_SUCCEEDED(SQLExecute(hstmt)) && SQLFetch(hstmt) == SQL_SUCCESS) {
+        size_t cap = 8192, usado = 0;
+        char *buf = malloc(cap);
+        buf[0] = '\0';
+        SQLRETURN ret;
+        char trozo[4096];
+        SQLLEN ind;
+        do {
+            ret = SQLGetData(hstmt, 1, SQL_C_CHAR, trozo, sizeof(trozo), &ind);
+            if (ind == SQL_NULL_DATA || !SQL_SUCCEEDED(ret)) break;
+            size_t len_trozo = strlen(trozo);
+            if (usado + len_trozo + 1 > cap) {
+                cap = (usado + len_trozo + 1) * 2;
+                buf = realloc(buf, cap);
+            }
+            memcpy(buf + usado, trozo, len_trozo);
+            usado += len_trozo;
+            buf[usado] = '\0';
+        } while (ret == SQL_SUCCESS_WITH_INFO);
+        *out_foto_base64 = buf;
+        ok = 0;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
+}
+
+/* Id de la mascota mas reciente con ese nombre y fecha de ingreso
+ * (para guardar la foto justo despues de registrarla). */
+int mascota_ultimo_id(const char *nombre, const char *fecha_ingreso, int *id_out) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    SQLPrepare(hstmt, (SQLCHAR *)
+        "SELECT TOP 1 id FROM mascotas WHERE nombre=? AND fecha_ingreso=? ORDER BY id DESC;", SQL_NTS);
+    char nombre_buf[64], fecha_buf[16];
+    snprintf(nombre_buf, sizeof(nombre_buf), "%s", nombre);
+    snprintf(fecha_buf, sizeof(fecha_buf), "%s", fecha_ingreso);
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(nombre_buf) - 1, 0, nombre_buf, 0, NULL);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, sizeof(fecha_buf) - 1, 0, fecha_buf, 0, NULL);
+    int ok = -1;
+    if (SQL_SUCCEEDED(SQLExecute(hstmt)) && SQLFetch(hstmt) == SQL_SUCCESS) {
+        SQLINTEGER v = 0;
+        SQLLEN ind;
+        SQLGetData(hstmt, 1, SQL_C_SLONG, &v, 0, &ind);
+        *id_out = (int)v;
+        ok = 0;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return ok;
 }
 
 /* ---------------- Vacunas ---------------- */
