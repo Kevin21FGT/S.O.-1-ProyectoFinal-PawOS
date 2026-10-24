@@ -34,6 +34,7 @@
 #define MAX_INTENTOS_RECUPERAR 5
 
 static void solo_digitos(const char *src, char *dst, size_t n);
+static gchar *portal_obtener_foto_b64(GtkWindow *padre);
 #define FOTO_AVATAR_SIZE 84
 #define RECORTE_MAX_DIM 640
 
@@ -53,6 +54,7 @@ enum {
     COL_CAT_RAZA,
     COL_CAT_EDAD,
     COL_CAT_INGRESO,
+    COL_CAT_FOTO,
     N_COLUMNAS_CATALOGO
 };
 
@@ -204,6 +206,85 @@ static void on_password_changed(GtkEditable *editable, gpointer datos) {
     }
 }
 
+/* Convierte una foto base64 en miniatura (conserva proporcion, maximo `lado`). */
+static GdkPixbuf *pixbuf_desde_b64(const gchar *b64, int lado) {
+    if (!b64 || !b64[0]) return NULL;
+    gsize largo = 0;
+    guchar *datos = g_base64_decode(b64, &largo);
+    if (!datos || largo == 0) { g_free(datos); return NULL; }
+    GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+    GdkPixbuf *res = NULL;
+    if (gdk_pixbuf_loader_write(loader, datos, largo, NULL) &&
+        gdk_pixbuf_loader_close(loader, NULL)) {
+        GdkPixbuf *pix = gdk_pixbuf_loader_get_pixbuf(loader);
+        if (pix) {
+            int w = gdk_pixbuf_get_width(pix), h = gdk_pixbuf_get_height(pix);
+            int mx = w > h ? w : h;
+            double f = mx > lado ? (double)lado / (double)mx : 1.0;
+            int nw = (int)(w * f), nh = (int)(h * f);
+            if (nw < 1) nw = 1;
+            if (nh < 1) nh = 1;
+            res = gdk_pixbuf_scale_simple(pix, nw, nh, GDK_INTERP_BILINEAR);
+        }
+    }
+    g_object_unref(loader);
+    g_free(datos);
+    return res;
+}
+
+typedef struct {
+    GtkWindow *padre;
+    GtkWidget *imagen;
+    gchar     *b64;
+} RegFoto;
+
+static void reg_foto_vaciar(RegFoto *rf) {
+    g_free(rf->b64);
+    rf->b64 = NULL;
+    gtk_image_set_from_icon_name(GTK_IMAGE(rf->imagen), "avatar-default-symbolic", GTK_ICON_SIZE_DIALOG);
+}
+
+static void on_reg_foto_elegir(GtkButton *btn, gpointer datos) {
+    (void)btn;
+    RegFoto *rf = datos;
+    gchar *b64 = portal_obtener_foto_b64(rf->padre);
+    if (!b64) return;
+    g_free(rf->b64);
+    rf->b64 = b64;
+    GdkPixbuf *mini = pixbuf_desde_b64(b64, 96);
+    if (mini) {
+        gtk_image_set_from_pixbuf(GTK_IMAGE(rf->imagen), mini);
+        g_object_unref(mini);
+    }
+}
+
+static void on_reg_foto_quitar(GtkButton *btn, gpointer datos) {
+    (void)btn;
+    reg_foto_vaciar((RegFoto *)datos);
+}
+
+/* Ojito dentro del campo de contrasena: alterna entre puntos y texto. */
+static void on_ojo_password(GtkEntry *entrada, GtkEntryIconPosition posicion,
+                            GdkEvent *evento, gpointer datos) {
+    (void)evento;
+    (void)datos;
+    if (posicion != GTK_ENTRY_ICON_SECONDARY) return;
+    gboolean visible = gtk_entry_get_visibility(entrada);
+    gtk_entry_set_visibility(entrada, !visible);
+    gtk_entry_set_icon_from_icon_name(entrada, GTK_ENTRY_ICON_SECONDARY,
+        !visible ? "view-conceal-symbolic" : "view-reveal-symbolic");
+    gtk_entry_set_icon_tooltip_text(entrada, GTK_ENTRY_ICON_SECONDARY,
+        !visible ? "Ocultar contrasena" : "Mostrar contrasena");
+}
+
+static void activar_ojo_password(GtkWidget *entrada) {
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(entrada), GTK_ENTRY_ICON_SECONDARY,
+                                      "view-reveal-symbolic");
+    gtk_entry_set_icon_tooltip_text(GTK_ENTRY(entrada), GTK_ENTRY_ICON_SECONDARY,
+                                    "Mostrar contrasena");
+    g_signal_connect(entrada, "icon-press", G_CALLBACK(on_ojo_password), NULL);
+}
+
 static void mostrar_registro(GtkWindow *padre) {
     GtkWidget *dialogo = gtk_dialog_new_with_buttons(
         "Registrarme como cliente", padre, GTK_DIALOG_MODAL,
@@ -222,8 +303,10 @@ static void mostrar_registro(GtkWindow *padre) {
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_telefono), "Numero de WhatsApp");
     GtkWidget *entry_pass = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(entry_pass), FALSE);
+    activar_ojo_password(entry_pass);
     GtkWidget *entry_pass2 = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(entry_pass2), FALSE);
+    activar_ojo_password(entry_pass2);
 
     GtkWidget *error_correo = crear_etiqueta_error();
     GtkWidget *error_nombre = crear_etiqueta_error();
@@ -251,6 +334,25 @@ static void mostrar_registro(GtkWindow *padre) {
     gtk_grid_attach(GTK_GRID(grid), crear_etiqueta_campo("Confirmar contrasena:", TRUE), 0, fila, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_pass2, 1, fila++, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), error_pass2, 1, fila++, 1, 1);
+
+    RegFoto rf = { GTK_WINDOW(dialogo), NULL, NULL };
+    rf.imagen = gtk_image_new_from_icon_name("avatar-default-symbolic", GTK_ICON_SIZE_DIALOG);
+    gtk_image_set_pixel_size(GTK_IMAGE(rf.imagen), 64);
+    GtkWidget *caja_foto = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *col_btn = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    GtkWidget *btn_foto = gtk_button_new_with_label("Elegir foto...");
+    GtkWidget *btn_foto_q = gtk_button_new_with_label("Quitar");
+    g_signal_connect(btn_foto, "clicked", G_CALLBACK(on_reg_foto_elegir), &rf);
+    g_signal_connect(btn_foto_q, "clicked", G_CALLBACK(on_reg_foto_quitar), &rf);
+    gtk_box_pack_start(GTK_BOX(col_btn), btn_foto, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(col_btn), btn_foto_q, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(caja_foto), rf.imagen, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(caja_foto), col_btn, FALSE, FALSE, 0);
+    GtkWidget *lbl_foto_t = gtk_label_new("Foto (opcional):");
+    gtk_widget_set_halign(lbl_foto_t, GTK_ALIGN_START);
+    gtk_widget_set_valign(lbl_foto_t, GTK_ALIGN_START);
+    gtk_grid_attach(GTK_GRID(grid), lbl_foto_t, 0, fila, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), caja_foto, 1, fila++, 1, 1);
 
     GtkWidget *lbl_nota = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(lbl_nota), "<span size='small' foreground='#777777'>* Campo obligatorio</span>");
@@ -301,13 +403,19 @@ static void mostrar_registro(GtkWindow *padre) {
             marcar_error_campo(error_correo, "Ya existe un cliente registrado con ese correo");
             continue;
         }
-        if (cliente_registrar(correo, pass, nombre, telefono, ROL_CLIENTE_JEFE) != 0) {
+        if (cliente_registrar(correo, pass, nombre, telefono, ROL_CLIENTE_NORMAL) != 0) {
             mostrar_mensaje(GTK_WINDOW(dialogo), "No se pudo completar el registro.", TRUE);
             continue;
+        }
+        if (rf.b64) {
+            Cliente nuevo;
+            if (cliente_autenticar(correo, pass, &nuevo) == 0)
+                cliente_guardar_foto(nuevo.id, rf.b64);
         }
         mostrar_mensaje(GTK_WINDOW(dialogo), "Registro completado. Ya puedes iniciar sesion.", FALSE);
         break;
     }
+    g_free(rf.b64);
     gtk_widget_destroy(dialogo);
 }
 
@@ -368,8 +476,10 @@ static void mostrar_recuperar_password(GtkWindow *padre) {
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_telefono), "El numero que registraste");
     GtkWidget *entry_pass = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(entry_pass), FALSE);
+    activar_ojo_password(entry_pass);
     GtkWidget *entry_pass2 = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(entry_pass2), FALSE);
+    activar_ojo_password(entry_pass2);
 
     GtkWidget *error_correo = crear_etiqueta_error();
     GtkWidget *error_telefono = crear_etiqueta_error();
@@ -494,6 +604,7 @@ static gboolean mostrar_login(Cliente *out) {
         gtk_entry_set_placeholder_text(GTK_ENTRY(entry_correo), "Correo");
         GtkWidget *entry_pass = gtk_entry_new();
         gtk_entry_set_visibility(GTK_ENTRY(entry_pass), FALSE);
+        activar_ojo_password(entry_pass);
         gtk_entry_set_placeholder_text(GTK_ENTRY(entry_pass), "Contrasena");
         gtk_entry_set_activates_default(GTK_ENTRY(entry_pass), TRUE);
 
@@ -867,11 +978,157 @@ static GdkPixbuf *mostrar_dialogo_recorte(GtkWindow *padre, GdkPixbuf *imagen_or
     return resultado;
 }
 
-static void on_cambiar_foto_clicked(GtkButton *btn, gpointer datos) {
-    (void)btn;
-    ContextoApp *ctx = datos;
+/* ---------- Editor basico de foto: girar, voltear, brillo, contraste ---------- */
 
-    GtkWidget *selector = gtk_file_chooser_dialog_new("Elegir foto de perfil", GTK_WINDOW(ctx->ventana),
+typedef struct {
+    GdkPixbuf *base;
+    GtkWidget *imagen;
+    GtkWidget *esc_brillo;
+    GtkWidget *esc_contraste;
+} EditorBasico;
+
+static GdkPixbuf *foto_ajustar(GdkPixbuf *src, double brillo, double contraste) {
+    GdkPixbuf *dst = gdk_pixbuf_copy(src);
+    if (!dst) return NULL;
+    if (brillo == 0.0 && contraste == 1.0) return dst;
+    guchar tabla[256];
+    for (int i = 0; i < 256; i++) {
+        double v = (i - 128) * contraste + 128 + brillo;
+        tabla[i] = v < 0 ? 0 : (v > 255 ? 255 : (guchar)v);
+    }
+    int w = gdk_pixbuf_get_width(dst), h = gdk_pixbuf_get_height(dst);
+    int nc = gdk_pixbuf_get_n_channels(dst), rs = gdk_pixbuf_get_rowstride(dst);
+    guchar *px = gdk_pixbuf_get_pixels(dst);
+    for (int y = 0; y < h; y++) {
+        guchar *fila = px + (size_t)y * rs;
+        for (int x = 0; x < w; x++)
+            for (int c = 0; c < 3; c++)
+                fila[x * nc + c] = tabla[fila[x * nc + c]];
+    }
+    return dst;
+}
+
+static void ed_refrescar(EditorBasico *e) {
+    int w = gdk_pixbuf_get_width(e->base), h = gdk_pixbuf_get_height(e->base);
+    int mx = w > h ? w : h;
+    GdkPixbuf *peq;
+    if (mx > 360) {
+        double f = 360.0 / (double)mx;
+        int nw = (int)(w * f), nh = (int)(h * f);
+        if (nw < 1) nw = 1;
+        if (nh < 1) nh = 1;
+        peq = gdk_pixbuf_scale_simple(e->base, nw, nh, GDK_INTERP_BILINEAR);
+    } else {
+        peq = GDK_PIXBUF(g_object_ref(e->base));
+    }
+    GdkPixbuf *aj = foto_ajustar(peq,
+        gtk_range_get_value(GTK_RANGE(e->esc_brillo)),
+        gtk_range_get_value(GTK_RANGE(e->esc_contraste)) / 100.0);
+    if (aj) {
+        gtk_image_set_from_pixbuf(GTK_IMAGE(e->imagen), aj);
+        g_object_unref(aj);
+    }
+    g_object_unref(peq);
+}
+
+static void ed_on_slider(GtkRange *r, gpointer datos) {
+    (void)r;
+    ed_refrescar((EditorBasico *)datos);
+}
+
+/* accion: 0 = girar izquierda, 1 = girar derecha, 2 = voltear, 3 = restablecer */
+static void ed_on_accion(GtkButton *btn, gpointer datos) {
+    EditorBasico *e = datos;
+    int accion = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "accion"));
+    GdkPixbuf *nuevo = NULL;
+    if (accion == 0)
+        nuevo = gdk_pixbuf_rotate_simple(e->base, GDK_PIXBUF_ROTATE_COUNTERCLOCKWISE);
+    else if (accion == 1)
+        nuevo = gdk_pixbuf_rotate_simple(e->base, GDK_PIXBUF_ROTATE_CLOCKWISE);
+    else if (accion == 2)
+        nuevo = gdk_pixbuf_flip(e->base, TRUE);
+    else {
+        gtk_range_set_value(GTK_RANGE(e->esc_brillo), 0);
+        gtk_range_set_value(GTK_RANGE(e->esc_contraste), 100);
+        return;
+    }
+    if (nuevo) {
+        g_object_unref(e->base);
+        e->base = nuevo;
+        ed_refrescar(e);
+    }
+}
+
+static GtkWidget *ed_boton(const char *texto, int accion, EditorBasico *e) {
+    GtkWidget *b = gtk_button_new_with_label(texto);
+    g_object_set_data(G_OBJECT(b), "accion", GINT_TO_POINTER(accion));
+    g_signal_connect(b, "clicked", G_CALLBACK(ed_on_accion), e);
+    return b;
+}
+
+/* Devuelve un pixbuf nuevo ya editado, o NULL si se cancela. No toma
+ * posesion de `original`. */
+static GdkPixbuf *foto_editor_basico(GtkWindow *padre, GdkPixbuf *original) {
+    EditorBasico e;
+    e.base = GDK_PIXBUF(g_object_ref(original));
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons("Editar foto", padre, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL, "_Continuar al recorte", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    gtk_container_set_border_width(GTK_CONTAINER(area), 12);
+    gtk_box_set_spacing(GTK_BOX(area), 8);
+
+    e.imagen = gtk_image_new();
+    gtk_widget_set_size_request(e.imagen, 380, 380);
+    gtk_box_pack_start(GTK_BOX(area), e.imagen, TRUE, TRUE, 0);
+
+    GtkWidget *fila_btn = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_pack_start(GTK_BOX(fila_btn), ed_boton("Girar a la izquierda", 0, &e), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(fila_btn), ed_boton("Girar a la derecha", 1, &e), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(fila_btn), ed_boton("Voltear", 2, &e), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(fila_btn), ed_boton("Restablecer", 3, &e), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(area), fila_btn, FALSE, FALSE, 0);
+
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 4);
+    e.esc_brillo = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, -100, 100, 1);
+    e.esc_contraste = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 50, 200, 1);
+    gtk_range_set_value(GTK_RANGE(e.esc_brillo), 0);
+    gtk_range_set_value(GTK_RANGE(e.esc_contraste), 100);
+    gtk_widget_set_hexpand(e.esc_brillo, TRUE);
+    gtk_widget_set_hexpand(e.esc_contraste, TRUE);
+    GtkWidget *l1 = gtk_label_new("Brillo:");
+    GtkWidget *l2 = gtk_label_new("Contraste:");
+    gtk_widget_set_halign(l1, GTK_ALIGN_START);
+    gtk_widget_set_halign(l2, GTK_ALIGN_START);
+    gtk_grid_attach(GTK_GRID(grid), l1, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e.esc_brillo, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), l2, 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e.esc_contraste, 1, 1, 1, 1);
+    gtk_box_pack_start(GTK_BOX(area), grid, FALSE, FALSE, 0);
+    g_signal_connect(e.esc_brillo, "value-changed", G_CALLBACK(ed_on_slider), &e);
+    g_signal_connect(e.esc_contraste, "value-changed", G_CALLBACK(ed_on_slider), &e);
+
+    ed_refrescar(&e);
+    gtk_widget_show_all(dialogo);
+    int resp = gtk_dialog_run(GTK_DIALOG(dialogo));
+
+    GdkPixbuf *resultado = NULL;
+    if (resp == GTK_RESPONSE_OK) {
+        resultado = foto_ajustar(e.base,
+            gtk_range_get_value(GTK_RANGE(e.esc_brillo)),
+            gtk_range_get_value(GTK_RANGE(e.esc_contraste)) / 100.0);
+    }
+    gtk_widget_destroy(dialogo);
+    g_object_unref(e.base);
+    return resultado;
+}
+
+/* Flujo completo: elegir archivo -> editor basico -> recorte -> PNG en base64.
+ * Devuelve una cadena nueva (liberar con g_free) o NULL si se cancela. */
+static gchar *portal_obtener_foto_b64(GtkWindow *padre) {
+    GtkWidget *selector = gtk_file_chooser_dialog_new("Elegir foto", padre,
         GTK_FILE_CHOOSER_ACTION_OPEN, "_Cancelar", GTK_RESPONSE_CANCEL, "_Abrir", GTK_RESPONSE_ACCEPT, NULL);
 
     GtkFileFilter *filtro = gtk_file_filter_new();
@@ -882,48 +1139,86 @@ static void on_cambiar_foto_clicked(GtkButton *btn, gpointer datos) {
 
     if (gtk_dialog_run(GTK_DIALOG(selector)) != GTK_RESPONSE_ACCEPT) {
         gtk_widget_destroy(selector);
-        return;
+        return NULL;
     }
     char *ruta = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(selector));
     gtk_widget_destroy(selector);
-    if (!ruta) return;
+    if (!ruta) return NULL;
 
     GError *error = NULL;
     GdkPixbuf *original = gdk_pixbuf_new_from_file(ruta, &error);
     g_free(ruta);
     if (!original) {
-        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo abrir esa imagen.", TRUE);
+        mostrar_mensaje(padre, "No se pudo abrir esa imagen.", TRUE);
         if (error) g_error_free(error);
-        return;
+        return NULL;
     }
 
-    GdkPixbuf *recortada = mostrar_dialogo_recorte(GTK_WINDOW(ctx->ventana), original);
+    /* Respeta la orientacion del celular, quita transparencia y limita a 1024 px */
+    GdkPixbuf *base = gdk_pixbuf_apply_embedded_orientation(original);
     g_object_unref(original);
-    if (!recortada) return; /* cancelo el recorte, o no selecciono nada */
+    if (!base) return NULL;
+    if (gdk_pixbuf_get_has_alpha(base)) {
+        GdkPixbuf *plano = gdk_pixbuf_composite_color_simple(base,
+            gdk_pixbuf_get_width(base), gdk_pixbuf_get_height(base),
+            GDK_INTERP_NEAREST, 255, 1, 0xFFFFFF, 0xFFFFFF);
+        g_object_unref(base);
+        base = plano;
+        if (!base) return NULL;
+    }
+    {
+        int w = gdk_pixbuf_get_width(base), h = gdk_pixbuf_get_height(base);
+        int mx = w > h ? w : h;
+        if (mx > 1024) {
+            double f = 1024.0 / (double)mx;
+            int nw = (int)(w * f), nh = (int)(h * f);
+            if (nw < 1) nw = 1;
+            if (nh < 1) nh = 1;
+            GdkPixbuf *chica = gdk_pixbuf_scale_simple(base, nw, nh, GDK_INTERP_BILINEAR);
+            g_object_unref(base);
+            base = chica;
+            if (!base) return NULL;
+        }
+    }
 
-    /* Limita el maximo en pixeles para no inflar la BD remota con
-     * fotos enormes -- el usuario ya eligio la forma/tamano relativo
-     * que quiere en el recorte, esto solo evita archivos gigantes. */
+    GdkPixbuf *editada = foto_editor_basico(padre, base);
+    g_object_unref(base);
+    if (!editada) return NULL;
+
+    GdkPixbuf *recortada = mostrar_dialogo_recorte(padre, editada);
+    g_object_unref(editada);
+    if (!recortada) return NULL;
+
+    /* Maximo 512 px para no inflar la BD remota */
     int rw = gdk_pixbuf_get_width(recortada), rh = gdk_pixbuf_get_height(recortada);
     if (rw > 512 || rh > 512) {
         double esc = 512.0 / (double)(rw > rh ? rw : rh);
         GdkPixbuf *mas_chica = gdk_pixbuf_scale_simple(recortada, (int)(rw * esc), (int)(rh * esc), GDK_INTERP_BILINEAR);
         g_object_unref(recortada);
         recortada = mas_chica;
+        if (!recortada) return NULL;
     }
 
     gchar *buffer = NULL;
     gsize tam_buffer = 0;
     if (!gdk_pixbuf_save_to_buffer(recortada, &buffer, &tam_buffer, "png", &error, NULL)) {
-        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo procesar la imagen recortada.", TRUE);
+        mostrar_mensaje(padre, "No se pudo procesar la imagen.", TRUE);
         if (error) g_error_free(error);
         g_object_unref(recortada);
-        return;
+        return NULL;
     }
     g_object_unref(recortada);
-
     gchar *b64 = g_base64_encode((const guchar *)buffer, tam_buffer);
     g_free(buffer);
+    return b64;
+}
+
+static void on_cambiar_foto_clicked(GtkButton *btn, gpointer datos) {
+    (void)btn;
+    ContextoApp *ctx = datos;
+
+    gchar *b64 = portal_obtener_foto_b64(GTK_WINDOW(ctx->ventana));
+    if (!b64) return; /* cancelo en algun paso */
 
     int ok = cliente_guardar_foto(ctx->cliente.id, b64);
     g_free(b64);
@@ -964,6 +1259,7 @@ static void on_editar_perfil_clicked(GtkButton *btn, gpointer datos) {
     gtk_entry_set_text(GTK_ENTRY(entry_nombre), ctx->cliente.nombre);
     GtkWidget *entry_pass_nueva = gtk_entry_new();
     gtk_entry_set_visibility(GTK_ENTRY(entry_pass_nueva), FALSE);
+    activar_ojo_password(entry_pass_nueva);
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_pass_nueva), "Dejar vacia para no cambiarla");
 
     GtkWidget *entry_telefono = gtk_entry_new();
@@ -1065,6 +1361,44 @@ static GtkWidget *tarjeta_con_tabla(GtkWidget *treeview) {
     return tarjeta;
 }
 
+#define FOTO_MINIATURA_SIZE 64
+
+/* Baja la foto (base64) de una mascota y la devuelve como miniatura cuadrada.
+ * Devuelve NULL si no tiene foto o no se pudo leer. */
+static GdkPixbuf *miniatura_mascota(int mascota_id) {
+    char *b64 = NULL;
+    if (mascota_obtener_foto(mascota_id, &b64) != 0 || !b64 || b64[0] == '\0') {
+        free(b64);
+        return NULL;
+    }
+    gsize largo = 0;
+    guchar *datos = g_base64_decode(b64, &largo);
+    free(b64);
+    if (!datos || largo == 0) {
+        g_free(datos);
+        return NULL;
+    }
+    GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+    GdkPixbuf *resultado = NULL;
+    if (gdk_pixbuf_loader_write(loader, datos, largo, NULL) &&
+        gdk_pixbuf_loader_close(loader, NULL)) {
+        GdkPixbuf *pix = gdk_pixbuf_loader_get_pixbuf(loader);
+        if (pix) {
+            int w = gdk_pixbuf_get_width(pix), h = gdk_pixbuf_get_height(pix);
+            int lado = w < h ? w : h;
+            GdkPixbuf *sub = gdk_pixbuf_new_subpixbuf(pix, (w - lado) / 2, (h - lado) / 2, lado, lado);
+            if (sub) {
+                resultado = gdk_pixbuf_scale_simple(sub, FOTO_MINIATURA_SIZE, FOTO_MINIATURA_SIZE,
+                                                    GDK_INTERP_BILINEAR);
+                g_object_unref(sub);
+            }
+        }
+    }
+    g_object_unref(loader);
+    g_free(datos);
+    return resultado;
+}
+
 static void cargar_catalogo(ContextoApp *ctx) {
     gtk_list_store_clear(ctx->store_catalogo);
     Mascota *ms = NULL;
@@ -1075,6 +1409,7 @@ static void cargar_catalogo(ContextoApp *ctx) {
     }
     for (int i = 0; i < n; i++) {
         gchar *edad = g_strdup_printf("%d", ms[i].edad);
+        GdkPixbuf *foto = miniatura_mascota(ms[i].id);
         GtkTreeIter iter;
         gtk_list_store_append(ctx->store_catalogo, &iter);
         gtk_list_store_set(ctx->store_catalogo, &iter,
@@ -1084,7 +1419,9 @@ static void cargar_catalogo(ContextoApp *ctx) {
             COL_CAT_RAZA, ms[i].raza,
             COL_CAT_EDAD, edad,
             COL_CAT_INGRESO, ms[i].fecha_ingreso,
+            COL_CAT_FOTO, foto,
             -1);
+        if (foto) g_object_unref(foto);
         g_free(edad);
     }
     free(ms);
@@ -1470,6 +1807,56 @@ static void acciones_pdf(ContextoApp *ctx, const char *ruta, const char *nombre_
     gtk_widget_destroy(d);
 }
 
+/* Por cada mascota distinta de las filas (la 1a celda es el nombre) agrega
+ * --mascota-foto "Nombre=/tmp/foto.jpg" (ruta vacia si no tiene foto).
+ * `a_liberar` guarda los textos de los argumentos y `temporales` las rutas
+ * de las fotos, que el que llama debe borrar al terminar. */
+static void agregar_fotos_mascotas(GPtrArray *argv, GPtrArray *filas,
+                                   GPtrArray *a_liberar, GPtrArray *temporales) {
+    Mascota *ms = NULL;
+    int n = 0;
+    if (mascota_listar(&ms, &n) != 0) return;
+    GPtrArray *vistos = g_ptr_array_new_with_free_func(g_free);
+    for (guint i = 0; i < filas->len; i++) {
+        const char *fila = g_ptr_array_index(filas, i);
+        const char *barra = strchr(fila, '|');
+        gchar *nombre = barra ? g_strndup(fila, (gsize)(barra - fila)) : g_strdup(fila);
+        gboolean repetido = (nombre[0] == '\0');
+        for (guint k = 0; !repetido && k < vistos->len; k++)
+            if (strcmp(g_ptr_array_index(vistos, k), nombre) == 0) repetido = TRUE;
+        if (repetido) { g_free(nombre); continue; }
+        g_ptr_array_add(vistos, nombre);
+
+        int id = -1;
+        for (int j = 0; j < n; j++)
+            if (strcmp(ms[j].nombre, nombre) == 0) { id = ms[j].id; break; }
+
+        gchar *ruta_tmp = NULL;
+        if (id >= 0) {
+            char *b64 = NULL;
+            if (mascota_obtener_foto(id, &b64) == 0 && b64 && b64[0]) {
+                gsize largo = 0;
+                guchar *bytes = g_base64_decode(b64, &largo);
+                gchar *candidata = g_strdup_printf("%s/pawos_mascota_%d_%d.jpg",
+                                                   g_get_tmp_dir(), (int)getpid(), id);
+                if (largo > 0 && g_file_set_contents(candidata, (const gchar *)bytes, (gssize)largo, NULL))
+                    ruta_tmp = candidata;
+                else
+                    g_free(candidata);
+                g_free(bytes);
+            }
+            free(b64);
+        }
+        gchar *arg = g_strdup_printf("%s=%s", nombre, ruta_tmp ? ruta_tmp : "");
+        g_ptr_array_add(argv, (gpointer)"--mascota-foto");
+        g_ptr_array_add(argv, arg);
+        g_ptr_array_add(a_liberar, arg);
+        if (ruta_tmp) g_ptr_array_add(temporales, ruta_tmp);
+    }
+    g_ptr_array_free(vistos, TRUE);
+    free(ms);
+}
+
 static void generar_y_ofrecer_pdf(ContextoApp *ctx, TipoPdf tipo) {
     const char *titulo = "", *columnas = "", *base = "documento";
     GPtrArray *filas = NULL;
@@ -1581,6 +1968,10 @@ static void generar_y_ofrecer_pdf(ContextoApp *ctx, TipoPdf tipo) {
                     g_ptr_array_add(argv, (gpointer)"--foto");    g_ptr_array_add(argv, foto_tmp);
                 }
             }
+            GPtrArray *fotos_args = g_ptr_array_new_with_free_func(g_free);
+            GPtrArray *fotos_tmp = g_ptr_array_new_with_free_func(g_free);
+            if (tipo == PDF_CARNET || tipo == PDF_SOLICITUDES)
+                agregar_fotos_mascotas(argv, filas, fotos_args, fotos_tmp);
             g_ptr_array_add(argv, NULL);
 
             gchar *err = NULL;
@@ -1601,6 +1992,9 @@ static void generar_y_ofrecer_pdf(ContextoApp *ctx, TipoPdf tipo) {
             if (gerr) g_error_free(gerr);
             g_free(err);
             g_ptr_array_free(argv, TRUE);
+            for (guint k = 0; k < fotos_tmp->len; k++) g_unlink(g_ptr_array_index(fotos_tmp, k));
+            g_ptr_array_free(fotos_tmp, TRUE);
+            g_ptr_array_free(fotos_args, TRUE);
             if (foto_tmp) { g_unlink(foto_tmp); g_free(foto_tmp); }
             g_free(id_txt);
             g_free(cliente);
@@ -1656,8 +2050,16 @@ static void agregar_pestanas_cliente(ContextoApp *ctx, GtkWidget *notebook) {
     gtk_box_pack_start(GTK_BOX(pag_cat), barra_cat, FALSE, FALSE, 0);
 
     ctx->store_catalogo = gtk_list_store_new(N_COLUMNAS_CATALOGO,
-        G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+        G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
+        GDK_TYPE_PIXBUF);
     GtkWidget *tv_cat = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->store_catalogo));
+    {
+        GtkCellRenderer *r_foto = gtk_cell_renderer_pixbuf_new();
+        g_object_set(r_foto, "xpad", 6, "ypad", 4, NULL);
+        GtkTreeViewColumn *c_foto = gtk_tree_view_column_new_with_attributes(
+            "Foto", r_foto, "pixbuf", COL_CAT_FOTO, NULL);
+        gtk_tree_view_append_column(GTK_TREE_VIEW(tv_cat), c_foto);
+    }
     anadir_columna(tv_cat, "Nombre", COL_CAT_NOMBRE, -1, TRUE);
     anadir_columna(tv_cat, "Especie", COL_CAT_ESPECIE, -1, FALSE);
     anadir_columna(tv_cat, "Raza", COL_CAT_RAZA, -1, FALSE);
@@ -1727,11 +2129,30 @@ static void agregar_pestanas_cliente(ContextoApp *ctx, GtkWidget *notebook) {
 
 /* ---------- Ventana principal ---------- */
 
+/* Al cerrar la ventana (X) se pregunta antes: Continuar o Cerrar sesion.
+ * Devolver TRUE evita que la ventana se cierre. */
+static gboolean on_ventana_delete(GtkWidget *ventana, GdkEvent *evento, gpointer datos) {
+    (void)evento;
+    (void)datos;
+    GtkWidget *d = gtk_message_dialog_new(GTK_WINDOW(ventana), GTK_DIALOG_MODAL,
+        GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE, "%s",
+        "Deseas cerrar sesion y volver al inicio de sesion?");
+    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d), "%s",
+        "Elige \"Continuar\" para seguir usando el Portal.");
+    gtk_dialog_add_button(GTK_DIALOG(d), "Continuar", GTK_RESPONSE_CANCEL);
+    gtk_dialog_add_button(GTK_DIALOG(d), "Cerrar sesion", GTK_RESPONSE_OK);
+    gtk_dialog_set_default_response(GTK_DIALOG(d), GTK_RESPONSE_CANCEL);
+    int r = gtk_dialog_run(GTK_DIALOG(d));
+    gtk_widget_destroy(d);
+    return r != GTK_RESPONSE_OK;
+}
+
 static void construir_ventana(ContextoApp *ctx) {
     ctx->ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(ctx->ventana), "PawOS - Portal de Clientes");
     gtk_window_set_default_size(GTK_WINDOW(ctx->ventana), 900, 620);
     gtk_window_set_position(GTK_WINDOW(ctx->ventana), GTK_WIN_POS_CENTER);
+    g_signal_connect(ctx->ventana, "delete-event", G_CALLBACK(on_ventana_delete), NULL);
     g_signal_connect(ctx->ventana, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
     GtkWidget *caja_raiz = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -1854,19 +2275,20 @@ int main(int argc, char *argv[]) {
 
     aplicar_estilos_simples();
 
-    ContextoApp ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    /* Login -> Portal -> (cerrar sesion) -> Login ... El programa solo se
+     * cierra con "Salir" en la ventana de login. */
+    for (;;) {
+        ContextoApp ctx;
+        memset(&ctx, 0, sizeof(ctx));
 
-    if (!mostrar_login(&ctx.cliente)) {
-        db_close();
-        return 0;
+        if (!mostrar_login(&ctx.cliente)) break;
+
+        construir_ventana(&ctx);
+        cargar_avatar(&ctx);
+        cargar_mis_vacunas(&ctx);
+
+        gtk_main();   /* vuelve cuando se cierra la sesion */
     }
-
-    construir_ventana(&ctx);
-    cargar_avatar(&ctx);
-    cargar_mis_vacunas(&ctx);
-
-    gtk_main();
     db_close();
     return 0;
 }

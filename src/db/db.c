@@ -632,6 +632,7 @@ const char *cliente_rol_nombre(RolCliente rol) {
     switch (rol) {
         case ROL_CLIENTE_ADMIN: return "Administrador";
         case ROL_CLIENTE_SUPERVISOR: return "Supervisor";
+        case ROL_CLIENTE_NORMAL: return "Cliente";
         default: return "Jefe";
     }
 }

@@ -2186,6 +2186,62 @@ static void on_filtro_solicitudes_toggled(GtkToggleButton *boton, gpointer datos
     cargar_solicitudes_portal((ContextoSolicitudes *)datos);
 }
 
+/* Avisa al cliente (correo y, si se aprobo, tambien WhatsApp) en segundo plano.
+ * Devuelve TRUE si se pudo lanzar el script de notificacion. */
+static gboolean notificar_solicitud_resuelta(int sid, int aprobar) {
+    SolicitudInfo *lista = NULL;
+    int n = 0;
+    if (solicitud_listar_todas(&lista, &n) != 0) return FALSE;
+    gboolean lanzado = FALSE;
+    for (int i = 0; i < n; i++) {
+        if (lista[i].id != sid) continue;
+        gchar *id_txt = g_strdup_printf("%d", sid);
+
+        /* Foto de la mascota -> archivo temporal (el script lo borra al terminar) */
+        gchar *foto_ruta = NULL;
+        {
+            char *b64 = NULL;
+            if (mascota_obtener_foto(lista[i].mascota_id, &b64) == 0 && b64 && b64[0]) {
+                gsize largo = 0;
+                guchar *bytes = g_base64_decode(b64, &largo);
+                gchar *candidata = g_strdup_printf("%s/pawos_notif_%d_%lld.jpg",
+                    g_get_tmp_dir(), sid, (long long)g_get_monotonic_time());
+                if (largo > 0 && g_file_set_contents(candidata, (const gchar *)bytes, (gssize)largo, NULL))
+                    foto_ruta = candidata;
+                else
+                    g_free(candidata);
+                g_free(bytes);
+            }
+            free(b64);
+        }
+
+        GPtrArray *av = g_ptr_array_new();
+        g_ptr_array_add(av, (gpointer)"pawos-notificar-solicitud");
+        g_ptr_array_add(av, (gpointer)"--estado");   g_ptr_array_add(av, (gpointer)(aprobar ? "aprobada" : "rechazada"));
+        g_ptr_array_add(av, (gpointer)"--id");       g_ptr_array_add(av, id_txt);
+        g_ptr_array_add(av, (gpointer)"--cliente");  g_ptr_array_add(av, lista[i].cliente_nombre);
+        g_ptr_array_add(av, (gpointer)"--correo");   g_ptr_array_add(av, lista[i].cliente_correo);
+        g_ptr_array_add(av, (gpointer)"--telefono"); g_ptr_array_add(av, lista[i].cliente_telefono);
+        g_ptr_array_add(av, (gpointer)"--mascota");  g_ptr_array_add(av, lista[i].mascota_nombre);
+        g_ptr_array_add(av, (gpointer)"--fecha");    g_ptr_array_add(av, lista[i].fecha);
+        if (foto_ruta) {
+            g_ptr_array_add(av, (gpointer)"--foto-mascota");
+            g_ptr_array_add(av, foto_ruta);
+        }
+        g_ptr_array_add(av, NULL);
+        lanzado = g_spawn_async(NULL, (gchar **)av->pdata, NULL,
+                                G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
+                                NULL, NULL, NULL, NULL);
+        if (!lanzado && foto_ruta) remove(foto_ruta);
+        g_ptr_array_free(av, TRUE);
+        g_free(foto_ruta);
+        g_free(id_txt);
+        break;
+    }
+    free(lista);
+    return lanzado;
+}
+
 static void resolver_solicitud_ui(ContextoSolicitudes *sc, int aprobar) {
     GtkTreeSelection *sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(sc->treeview));
     GtkTreeModel *modelo;
@@ -2233,11 +2289,17 @@ static void resolver_solicitud_ui(ContextoSolicitudes *sc, int aprobar) {
 
         if (solicitud_resolver(sid, mid, aprobar) == 0) {
             cargar_solicitudes_portal(sc);
-            mostrar_mensaje(GTK_WINDOW(sc->dialogo),
+            gboolean aviso = notificar_solicitud_resuelta(sid, aprobar);
+            gchar *txt_ok = g_strdup_printf("%s\n\n%s",
                 aprobar
                     ? "Solicitud aprobada. La mascota quedo \"en proceso\".\nCuando se entregue, usa Registrar adopcion."
                     : "Solicitud rechazada.",
-                FALSE);
+                aviso
+                    ? (aprobar ? "Se esta avisando al cliente por correo y WhatsApp (con PDF)."
+                               : "Se esta avisando al cliente por correo (con PDF).")
+                    : "No se pudo avisar al cliente: falta instalar pawos-notificar-solicitud.");
+            mostrar_mensaje(GTK_WINDOW(sc->dialogo), txt_ok, FALSE);
+            g_free(txt_ok);
         } else {
             mostrar_mensaje(GTK_WINDOW(sc->dialogo),
                 "No se pudo resolver la solicitud (puede que ya haya cambiado). Actualiza la lista.", TRUE);
@@ -4975,6 +5037,7 @@ static void on_cambiar_rol_cliente_clicked(GtkButton *boton, gpointer datos) {
         "_Guardar", GTK_RESPONSE_OK, NULL);
     GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
     GtkWidget *combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "3", "Cliente");
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "0", "Jefe");
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "1", "Supervisor");
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "2", "Administrador");
@@ -5708,12 +5771,12 @@ static void construir_ventana_cliente(const Cliente *cliente) {
     gtk_box_pack_start(GTK_BOX(fila_botones), btn_adoptar, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(fila_botones), btn_donar, FALSE, FALSE, 0);
 
-    if (ctx->rol >= ROL_CLIENTE_SUPERVISOR) {
+    if (ctx->rol == ROL_CLIENTE_SUPERVISOR || ctx->rol == ROL_CLIENTE_ADMIN) {
         GtkWidget *btn_historial = gtk_button_new_with_label("Ver mis solicitudes");
         gtk_box_pack_start(GTK_BOX(fila_botones), btn_historial, FALSE, FALSE, 0);
         g_signal_connect(btn_historial, "clicked", G_CALLBACK(on_ver_mis_solicitudes_clicked), ctx);
     }
-    if (ctx->rol >= ROL_CLIENTE_ADMIN) {
+    if (ctx->rol == ROL_CLIENTE_ADMIN) {
         GtkWidget *btn_editar = gtk_button_new_with_label("Editar mi cuenta");
         gtk_box_pack_start(GTK_BOX(fila_botones), btn_editar, FALSE, FALSE, 0);
         g_signal_connect(btn_editar, "clicked", G_CALLBACK(on_editar_cuenta_clicked), ctx);
@@ -5784,7 +5847,7 @@ static gboolean mostrar_registro_cliente(Cliente *cliente_out) {
          * mas bajo y la jerarquia no serviria de nada. Todo Cliente
          * nuevo entra en el nivel base; el Administrador del refugio
          * lo puede subir despues desde "Administrar Clientes". */
-        RolCliente rol_elegido = ROL_CLIENTE_JEFE;
+        RolCliente rol_elegido = ROL_CLIENTE_NORMAL;
         if (nombre[0] && correo[0] && password[0]) {
             if (cliente_registrar(correo, password, nombre, telefono, rol_elegido) == 0
                 && cliente_autenticar(correo, password, cliente_out) == 0) {

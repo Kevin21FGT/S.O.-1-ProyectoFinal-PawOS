@@ -77,7 +77,8 @@ typedef struct {
 typedef enum {
     ROL_CLIENTE_JEFE = 0,
     ROL_CLIENTE_SUPERVISOR = 1,
-    ROL_CLIENTE_ADMIN = 2
+    ROL_CLIENTE_ADMIN = 2,
+    ROL_CLIENTE_NORMAL = 3   /* persona normal (por defecto al registrarse) */
 } RolCliente;
 
 typedef struct {

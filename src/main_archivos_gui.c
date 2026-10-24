@@ -711,6 +711,72 @@ static void on_renombrar_clicked(GtkButton *btn, gpointer datos) {
 
 /* ---------- Menu de clic derecho y atajos de teclado ---------- */
 
+/* Guarda las fotos de las mascotas (JPEG en base64 en la BD) como archivos
+ * <id>_<nombre>.jpg dentro de `dir`. La carpeta se crea con la primera foto.
+ * Devuelve cuantas se guardaron, o -1 si no se pudo leer la lista. */
+static int exportar_fotos_mascotas(const char *dir) {
+    Mascota *ms = NULL;
+    int n = 0;
+    if (mascota_listar(&ms, &n) != 0) return -1;
+    int guardadas = 0;
+    gboolean dir_lista = FALSE;
+    for (int i = 0; i < n; i++) {
+        char *b64 = NULL;
+        if (mascota_obtener_foto(ms[i].id, &b64) != 0 || !b64 || !b64[0]) { free(b64); continue; }
+        gsize largo = 0;
+        guchar *bytes = g_base64_decode(b64, &largo);
+        free(b64);
+        if (bytes && largo > 0) {
+            if (!dir_lista) dir_lista = (g_mkdir_with_parents(dir, 0770) == 0);
+            if (dir_lista) {
+                gchar *seguro = g_strdup(ms[i].nombre);
+                for (gchar *p = seguro; *p; p++)
+                    if ((guchar)*p < 128 && !g_ascii_isalnum(*p)) *p = '_';
+                gchar *nombre = g_strdup_printf("%d_%s.jpg", ms[i].id, seguro);
+                gchar *ruta = g_build_filename(dir, nombre, NULL);
+                if (g_file_set_contents(ruta, (const gchar *)bytes, (gssize)largo, NULL)) guardadas++;
+                g_free(ruta);
+                g_free(nombre);
+                g_free(seguro);
+            }
+        }
+        g_free(bytes);
+    }
+    free(ms);
+    return guardadas;
+}
+
+/* Desde el menu se difiere (el menu se destruye al elegir una opcion). */
+static gboolean exportar_fotos_diferido(gpointer datos) {
+    ContextoApp *ctx = datos;
+    gchar *cat = categoria_seleccionada(ctx);
+    if (!cat || strcmp(cat, "mascotas") != 0) { g_free(cat); return G_SOURCE_REMOVE; }
+    gchar *rel = ruta_relativa_actual(ctx, cat);
+    gchar *dir = g_build_filename(archivos_ruta_base(), rel, "fotos_mascotas", NULL);
+    int n = exportar_fotos_mascotas(dir);
+    if (n < 0) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana),
+            "No se pudieron leer las mascotas (revisa la conexion) o crear la carpeta.", TRUE);
+    } else if (n == 0) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Ninguna mascota tiene foto todavia.", FALSE);
+    } else {
+        cargar_archivos(ctx);
+        gchar *msg = g_strdup_printf("%d foto%s exportada%s a la carpeta \"fotos_mascotas\".",
+                                     n, n == 1 ? "" : "s", n == 1 ? "" : "s");
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), msg, FALSE);
+        g_free(msg);
+    }
+    g_free(dir);
+    g_free(rel);
+    g_free(cat);
+    return G_SOURCE_REMOVE;
+}
+
+static void on_exportar_fotos_desde_menu(GtkMenuItem *item, gpointer datos) {
+    (void)item;
+    g_idle_add(exportar_fotos_diferido, datos);
+}
+
 static void agregar_item_menu(GtkWidget *menu, const char *texto, GCallback cb, ContextoApp *ctx, gboolean activo) {
     GtkWidget *item = gtk_menu_item_new_with_label(texto);
     gtk_widget_set_sensitive(item, activo);
@@ -754,6 +820,13 @@ static void mostrar_menu_contextual(ContextoApp *ctx, GdkEventButton *ev) {
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
     agregar_item_menu(menu, "Respaldar carpeta", G_CALLBACK(on_respaldar_carpeta_clicked), ctx, una_carpeta);
     agregar_item_menu(menu, "Respaldar datos ahora", G_CALLBACK(on_respaldar_desde_menu), ctx, n == 0);
+    {
+        gchar *cat_menu = categoria_seleccionada(ctx);
+        if (cat_menu && strcmp(cat_menu, "mascotas") == 0)
+            agregar_item_menu(menu, "Exportar fotos de mascotas aqui",
+                              G_CALLBACK(on_exportar_fotos_desde_menu), ctx, TRUE);
+        g_free(cat_menu);
+    }
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
     agregar_item_menu(menu, "Actualizar", G_CALLBACK(on_actualizar_clicked), ctx, TRUE);
     gtk_widget_show_all(menu);
@@ -1459,6 +1532,14 @@ static void on_respaldar_clicked(GtkButton *btn, gpointer datos) {
         g_string_free(csvs[i], TRUE);
     }
 
+    /* 2b. Fotos de las mascotas (archivos .jpg) junto a los CSV */
+    int fotos_exportadas = 0;
+    {
+        gchar *dir_fotos = g_build_filename(archivos_ruta_base(), "backups", carpeta, "fotos_mascotas", NULL);
+        fotos_exportadas = exportar_fotos_mascotas(dir_fotos);
+        g_free(dir_fotos);
+    }
+
     /* 3. Copia del SQLite local (usuarios del personal), como antes. */
     int sqlite_ok = (archivos_respaldar_bd_auto() == 0);
 
@@ -1466,6 +1547,8 @@ static void on_respaldar_clicked(GtkButton *btn, gpointer datos) {
 
     GString *msg = g_string_new("Respaldo terminado.\n\n");
     g_string_append_printf(msg, "- Archivos CSV en Backups/%s: %d de %d\n", carpeta, locales, N_TABLAS_RESPALDO);
+    if (fotos_exportadas >= 0)
+        g_string_append_printf(msg, "- Fotos de mascotas (Backups/%s/fotos_mascotas): %d\n", carpeta, fotos_exportadas);
     g_string_append_printf(msg, "- Copia en SmarterASP (tabla respaldos): %d de %d\n", remotos, N_TABLAS_RESPALDO);
     g_string_append_printf(msg, "- Base local de usuarios (SQLite): %s", sqlite_ok ? "copiada" : "no se pudo copiar");
     if (remotos < N_TABLAS_RESPALDO) {
