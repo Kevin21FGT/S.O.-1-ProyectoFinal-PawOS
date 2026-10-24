@@ -31,10 +31,10 @@
 #include <sql.h>
 #include <sqlext.h>
 
-#define API_SQL_SERVIDOR  "sql5111.site4now.net"
+#define API_SQL_SERVIDOR  "sql8011.site4now.net"
 #define API_SQL_PUERTO    "1433"
-#define API_SQL_BASE      "db_ace27e_pawos"
-#define API_SQL_USUARIO   "db_ace27e_pawos_admin"
+#define API_SQL_BASE      "db_acf53d_pawos"
+#define API_SQL_USUARIO   "db_acf53d_pawos_admin"
 
 static int api_leer_password_remota(char *out, size_t out_len) {
     const char *home = getenv("HOME");
