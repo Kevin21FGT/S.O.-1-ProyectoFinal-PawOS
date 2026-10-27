@@ -1619,6 +1619,121 @@ static void on_eliminar_clicked(GtkButton *boton, gpointer datos) {
     }
 }
 
+/* ---- Clic derecho en Gestion de Mascotas ---- */
+static void editar_datos_mascota(ContextoMascotas *ctx) {
+    int id;
+    if (!obtener_id_seleccionado(ctx->treeview, COL_M_ID, &id)) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Selecciona primero una mascota de la lista.", TRUE);
+        return;
+    }
+    Mascota m;
+    memset(&m, 0, sizeof(m));
+    if (mascota_buscar_por_id(id, &m) != 0) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo leer esa mascota.", TRUE);
+        return;
+    }
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Editar datos de la mascota", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 12);
+
+    GtkWidget *e_nombre = gtk_entry_new();
+    GtkWidget *e_especie = gtk_entry_new();
+    GtkWidget *e_raza = gtk_entry_new();
+    GtkWidget *e_edad = gtk_spin_button_new_with_range(0, 99, 1);
+    gtk_entry_set_text(GTK_ENTRY(e_nombre), m.nombre);
+    gtk_entry_set_text(GTK_ENTRY(e_especie), m.especie);
+    gtk_entry_set_text(GTK_ENTRY(e_raza), m.raza);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(e_edad), m.edad);
+
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Nombre:"), 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_nombre, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Especie:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_especie, 1, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Raza:"), 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_raza, 1, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Edad:"), 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_edad, 1, 3, 1, 1);
+    gtk_container_add(GTK_CONTAINER(area), grid);
+    gtk_widget_show_all(dialogo);
+
+    for (;;) {
+        if (gtk_dialog_run(GTK_DIALOG(dialogo)) != GTK_RESPONSE_OK) break;
+        const char *nom = gtk_entry_get_text(GTK_ENTRY(e_nombre));
+        const char *esp = gtk_entry_get_text(GTK_ENTRY(e_especie));
+        const char *raz = gtk_entry_get_text(GTK_ENTRY(e_raza));
+        int edad = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(e_edad));
+        if (nom[0] == '\0' || esp[0] == '\0') {
+            mostrar_mensaje(GTK_WINDOW(dialogo), "El nombre y la especie son obligatorios.", TRUE);
+            continue;
+        }
+        if (mascota_actualizar_datos(id, nom, esp, raz, edad) != 0) {
+            mostrar_mensaje(GTK_WINDOW(dialogo), "No se pudo actualizar la mascota.", TRUE);
+            continue;
+        }
+        cargar_mascotas(ctx);
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Mascota actualizada.", FALSE);
+        break;
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void on_mascotas_menu_editar(GtkMenuItem *item, gpointer datos) {
+    (void)item;
+    editar_datos_mascota((ContextoMascotas *)datos);
+}
+static void on_mascotas_menu_foto(GtkMenuItem *item, gpointer datos) {
+    (void)item;
+    on_foto_mascota_clicked(NULL, datos);
+}
+static void on_mascotas_menu_estado(GtkMenuItem *item, gpointer datos) {
+    (void)item;
+    on_cambiar_estado_clicked(NULL, datos);
+}
+static void on_mascotas_menu_eliminar(GtkMenuItem *item, gpointer datos) {
+    (void)item;
+    on_eliminar_clicked(NULL, datos);
+}
+
+static gboolean on_mascotas_clic(GtkWidget *vista, GdkEventButton *ev, gpointer datos) {
+    ContextoMascotas *ctx = (ContextoMascotas *)datos;
+    if (ev->type != GDK_BUTTON_PRESS || ev->button != 3) return FALSE;
+    GtkTreePath *ruta = NULL;
+    if (!gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(vista), (gint)ev->x, (gint)ev->y,
+                                       &ruta, NULL, NULL, NULL))
+        return FALSE;
+    gtk_tree_view_set_cursor(GTK_TREE_VIEW(vista), ruta, NULL, FALSE);
+    gtk_tree_path_free(ruta);
+
+    GtkWidget *menu = gtk_menu_new();
+    GtkWidget *it_editar = gtk_menu_item_new_with_label("Editar datos");
+    GtkWidget *it_foto = gtk_menu_item_new_with_label("Foto");
+    GtkWidget *it_estado = gtk_menu_item_new_with_label("Cambiar estado");
+    GtkWidget *it_elim = gtk_menu_item_new_with_label("Eliminar");
+    if (ctx->rol == ROL_VOLUNTARIO) {
+        gtk_widget_set_sensitive(it_editar, FALSE);
+        gtk_widget_set_sensitive(it_estado, FALSE);
+        gtk_widget_set_sensitive(it_elim, FALSE);
+    }
+    g_signal_connect(it_editar, "activate", G_CALLBACK(on_mascotas_menu_editar), ctx);
+    g_signal_connect(it_foto, "activate", G_CALLBACK(on_mascotas_menu_foto), ctx);
+    g_signal_connect(it_estado, "activate", G_CALLBACK(on_mascotas_menu_estado), ctx);
+    g_signal_connect(it_elim, "activate", G_CALLBACK(on_mascotas_menu_eliminar), ctx);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), it_editar);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), it_foto);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), it_estado);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), it_elim);
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)ev);
+    return TRUE;
+}
+
 static void on_refrescar_mascotas_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     cargar_mascotas((ContextoMascotas *)datos);
@@ -1732,6 +1847,7 @@ static void abrir_pantalla_mascotas(GtkWidget *area_dinamica, GtkWidget *ventana
     g_signal_connect(btn_estado, "clicked", G_CALLBACK(on_cambiar_estado_clicked), ctx);
     g_signal_connect(btn_eliminar, "clicked", G_CALLBACK(on_eliminar_clicked), ctx);
     g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
+    g_signal_connect(ctx->treeview, "button-press-event", G_CALLBACK(on_mascotas_clic), ctx);
 
     cargar_mascotas(ctx);
     mostrar_en_panel(area_dinamica, caja);
@@ -1744,6 +1860,8 @@ static void abrir_pantalla_mascotas(GtkWidget *area_dinamica, GtkWidget *ventana
 enum {
     COL_V_ID = 0,
     COL_V_MASCOTA_ID,
+    COL_V_MASCOTA_NOM,
+    COL_V_CLIENTE_NOM,
     COL_V_NOMBRE,
     COL_V_APLICACION,
     COL_V_PROXIMA,
@@ -1759,6 +1877,19 @@ typedef struct {
     gboolean      solo_pendientes;
 } ContextoVacunas;
 
+static const char *nombre_mascota_de_vacuna(const Mascota *ms, int n, int id) {
+    for (int i = 0; i < n; i++)
+        if (ms[i].id == id) return ms[i].nombre;
+    return "(sin mascota)";
+}
+
+static const char *nombre_cliente_de_vacuna(const Cliente *cs, int n, int id) {
+    if (id <= 0) return "-";
+    for (int i = 0; i < n; i++)
+        if (cs[i].id == id) return cs[i].nombre;
+    return "(cliente eliminado)";
+}
+
 static void cargar_vacunas(ContextoVacunas *ctx) {
     gtk_list_store_clear(ctx->store);
 
@@ -1769,6 +1900,12 @@ static void cargar_vacunas(ContextoVacunas *ctx) {
         mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo leer la lista de vacunas.", TRUE);
         return;
     }
+    Mascota *ms_nombres = NULL;
+    int n_ms_nombres = 0;
+    if (mascota_listar(&ms_nombres, &n_ms_nombres) != 0) { ms_nombres = NULL; n_ms_nombres = 0; }
+    Cliente *cl_nombres = NULL;
+    int n_cl_nombres = 0;
+    if (cliente_listar(&cl_nombres, &n_cl_nombres) != 0) { cl_nombres = NULL; n_cl_nombres = 0; }
 
     for (int i = 0; i < n; i++) {
         GtkTreeIter iter;
@@ -1776,6 +1913,8 @@ static void cargar_vacunas(ContextoVacunas *ctx) {
         gtk_list_store_set(ctx->store, &iter,
             COL_V_ID, vs[i].id,
             COL_V_MASCOTA_ID, vs[i].mascota_id,
+            COL_V_MASCOTA_NOM, nombre_mascota_de_vacuna(ms_nombres, n_ms_nombres, vs[i].mascota_id),
+            COL_V_CLIENTE_NOM, nombre_cliente_de_vacuna(cl_nombres, n_cl_nombres, vs[i].cliente_id),
             COL_V_NOMBRE, vs[i].nombre_vacuna,
             COL_V_APLICACION, vs[i].fecha_aplicacion,
             COL_V_PROXIMA, vs[i].fecha_proxima,
@@ -1783,6 +1922,8 @@ static void cargar_vacunas(ContextoVacunas *ctx) {
             -1);
     }
     free(vs);
+    free(ms_nombres);
+    free(cl_nombres);
 }
 
 static void on_ver_todas_vacunas_clicked(GtkButton *boton, gpointer datos) {
@@ -1959,6 +2100,146 @@ static void on_registrar_vacuna_clicked(GtkButton *boton, gpointer datos) {
     gtk_widget_destroy(dialogo);
 }
 
+/* ---- Clic derecho en la lista de vacunas: Editar / Eliminar ---- */
+static void editar_vacuna_id(ContextoVacunas *ctx, int id) {
+    Vacuna v;
+    memset(&v, 0, sizeof(v));
+    if (vacuna_buscar_por_id(id, &v) != 0) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo leer esa vacuna.", TRUE);
+        return;
+    }
+
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Editar vacuna", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *cuadricula = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(cuadricula), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(cuadricula), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(cuadricula), 12);
+
+    GtkWidget *e_nombre = gtk_entry_new();
+    GtkWidget *e_aplic  = gtk_entry_new();
+    GtkWidget *e_prox   = gtk_entry_new();
+    GtkWidget *e_obs    = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(e_nombre), v.nombre_vacuna);
+    gtk_entry_set_text(GTK_ENTRY(e_aplic), v.fecha_aplicacion);
+    gtk_entry_set_text(GTK_ENTRY(e_prox), v.fecha_proxima);
+    gtk_entry_set_text(GTK_ENTRY(e_obs), v.observaciones);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_aplic), "AAAA-MM-DD");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_prox), "AAAA-MM-DD (opcional)");
+
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Nombre de la vacuna:"), 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_nombre, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Fecha de aplicacion:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_aplic, 1, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Proxima dosis:"), 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_prox, 1, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), gtk_label_new("Observaciones:"), 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(cuadricula), e_obs, 1, 3, 1, 1);
+    gtk_container_add(GTK_CONTAINER(area), cuadricula);
+    gtk_widget_show_all(dialogo);
+
+    gboolean ok = FALSE;
+    for (;;) {
+        if (gtk_dialog_run(GTK_DIALOG(dialogo)) != GTK_RESPONSE_OK) break;
+        const char *nom = gtk_entry_get_text(GTK_ENTRY(e_nombre));
+        const char *fapl = gtk_entry_get_text(GTK_ENTRY(e_aplic));
+        const char *fprox = gtk_entry_get_text(GTK_ENTRY(e_prox));
+        if (nom[0] == '\0') {
+            mostrar_mensaje(GTK_WINDOW(dialogo), "El nombre de la vacuna no puede quedar vacio.", TRUE);
+            continue;
+        }
+        if (!fecha_valida(fapl)) {
+            mostrar_mensaje(GTK_WINDOW(dialogo),
+                "La fecha de aplicacion debe tener el formato AAAA-MM-DD y ser una fecha valida.", TRUE);
+            continue;
+        }
+        if (fprox[0] != '\0' && !fecha_valida(fprox)) {
+            mostrar_mensaje(GTK_WINDOW(dialogo),
+                "La proxima dosis debe tener el formato AAAA-MM-DD, o dejarse vacia.", TRUE);
+            continue;
+        }
+        ok = TRUE;
+        break;
+    }
+
+    if (ok) {
+        snprintf(v.nombre_vacuna, sizeof(v.nombre_vacuna), "%s", gtk_entry_get_text(GTK_ENTRY(e_nombre)));
+        snprintf(v.fecha_aplicacion, sizeof(v.fecha_aplicacion), "%s", gtk_entry_get_text(GTK_ENTRY(e_aplic)));
+        snprintf(v.fecha_proxima, sizeof(v.fecha_proxima), "%s", gtk_entry_get_text(GTK_ENTRY(e_prox)));
+        snprintf(v.observaciones, sizeof(v.observaciones), "%s", gtk_entry_get_text(GTK_ENTRY(e_obs)));
+        if (vacuna_actualizar(&v) == 0) {
+            cargar_vacunas(ctx);
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Vacuna actualizada.", FALSE);
+        } else {
+            mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo actualizar la vacuna.", TRUE);
+        }
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void eliminar_vacuna_id(ContextoVacunas *ctx, int id) {
+    GtkWidget *conf = gtk_message_dialog_new(
+        GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION,
+        GTK_BUTTONS_YES_NO, "Eliminar esta vacuna del registro?");
+    gint r = gtk_dialog_run(GTK_DIALOG(conf));
+    gtk_widget_destroy(conf);
+    if (r != GTK_RESPONSE_YES) return;
+    if (vacuna_eliminar(id) != 0) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "No se pudo eliminar la vacuna.", TRUE);
+        return;
+    }
+    cargar_vacunas(ctx);
+}
+
+static void on_vacuna_menu_editar(GtkMenuItem *item, gpointer datos) {
+    editar_vacuna_id((ContextoVacunas *)datos,
+        GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "vacuna-id")));
+}
+
+static void on_vacuna_menu_eliminar(GtkMenuItem *item, gpointer datos) {
+    eliminar_vacuna_id((ContextoVacunas *)datos,
+        GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "vacuna-id")));
+}
+
+static gboolean on_vacunas_clic(GtkWidget *vista, GdkEventButton *ev, gpointer datos) {
+    ContextoVacunas *ctx = (ContextoVacunas *)datos;
+    if (ev->type != GDK_BUTTON_PRESS || ev->button != 3) return FALSE;
+
+    GtkTreePath *ruta = NULL;
+    if (!gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(vista), (gint)ev->x, (gint)ev->y,
+                                       &ruta, NULL, NULL, NULL))
+        return FALSE;
+    gtk_tree_view_set_cursor(GTK_TREE_VIEW(vista), ruta, NULL, FALSE);
+
+    GtkTreeIter iter;
+    int id = -1;
+    if (gtk_tree_model_get_iter(GTK_TREE_MODEL(ctx->store), &iter, ruta))
+        gtk_tree_model_get(GTK_TREE_MODEL(ctx->store), &iter, COL_V_ID, &id, -1);
+    gtk_tree_path_free(ruta);
+    if (id < 0) return FALSE;
+
+    if (ctx->rol == ROL_VOLUNTARIO) {
+        mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Requiere rol Admin o Veterinario.", TRUE);
+        return TRUE;
+    }
+
+    GtkWidget *menu = gtk_menu_new();
+    GtkWidget *it_editar = gtk_menu_item_new_with_label("Editar");
+    GtkWidget *it_elim = gtk_menu_item_new_with_label("Eliminar");
+    g_object_set_data(G_OBJECT(it_editar), "vacuna-id", GINT_TO_POINTER(id));
+    g_object_set_data(G_OBJECT(it_elim), "vacuna-id", GINT_TO_POINTER(id));
+    g_signal_connect(it_editar, "activate", G_CALLBACK(on_vacuna_menu_editar), ctx);
+    g_signal_connect(it_elim, "activate", G_CALLBACK(on_vacuna_menu_eliminar), ctx);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), it_editar);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), it_elim);
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)ev);
+    return TRUE;
+}
+
 static void abrir_pantalla_vacunas(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {
     ContextoVacunas *ctx = g_malloc0(sizeof(ContextoVacunas));
     ctx->rol = rol;
@@ -1974,11 +2255,11 @@ static void abrir_pantalla_vacunas(GtkWidget *area_dinamica, GtkWidget *ventana_
     gtk_box_pack_start(GTK_BOX(caja), titulo, FALSE, FALSE, 0);
 
     ctx->store = gtk_list_store_new(N_COL_VACUNAS,
-        G_TYPE_INT, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+        G_TYPE_INT, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
     ctx->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(ctx->store));
     g_object_unref(ctx->store);
 
-    const char *encabezados[N_COL_VACUNAS] = {"ID", "ID Mascota", "Vacuna", "Aplicada", "Proxima", "Observaciones"};
+    const char *encabezados[N_COL_VACUNAS] = {"ID", "ID Mascota", "Mascota", "Cliente", "Vacuna", "Aplicada", "Proxima", "Observaciones"};
     for (int i = 0; i < N_COL_VACUNAS; i++) {
         GtkCellRenderer *render = gtk_cell_renderer_text_new();
         GtkTreeViewColumn *col = gtk_tree_view_column_new_with_attributes(
@@ -2016,6 +2297,8 @@ static void abrir_pantalla_vacunas(GtkWidget *area_dinamica, GtkWidget *ventana_
     g_signal_connect(btn_pendientes, "clicked", G_CALLBACK(on_ver_pendientes_vacunas_clicked), ctx);
     g_signal_connect(btn_registrar, "clicked", G_CALLBACK(on_registrar_vacuna_clicked), ctx);
     g_signal_connect(btn_cerrar, "clicked", G_CALLBACK(on_cerrar_panel_clicked), area_dinamica);
+
+    g_signal_connect(ctx->treeview, "button-press-event", G_CALLBACK(on_vacunas_clic), ctx);
 
     cargar_vacunas(ctx);
     mostrar_en_panel(area_dinamica, caja);
@@ -5059,6 +5342,116 @@ static void on_cambiar_rol_cliente_clicked(GtkButton *boton, gpointer datos) {
     gtk_widget_destroy(dialogo);
 }
 
+/* ---- Clic derecho en Administrar Clientes: Editar datos / Cambiar rol ---- */
+static void editar_datos_cliente(GtkTreeView *vista) {
+    GtkTreeSelection *seleccion = gtk_tree_view_get_selection(vista);
+    GtkTreeModel *modelo;
+    GtkTreeIter iter;
+    if (!gtk_tree_selection_get_selected(seleccion, &modelo, &iter)) return;
+    gint id_cliente;
+    gtk_tree_model_get(modelo, &iter, 0, &id_cliente, -1);
+
+    /* El telefono no esta en la tabla: se busca en la lista de Clientes. */
+    char nombre_actual[64] = "", telefono_actual[32] = "";
+    Cliente *lista = NULL;
+    int n = 0;
+    if (cliente_listar(&lista, &n) == 0) {
+        for (int i = 0; i < n; i++) {
+            if (lista[i].id == id_cliente) {
+                snprintf(nombre_actual, sizeof(nombre_actual), "%s", lista[i].nombre);
+                snprintf(telefono_actual, sizeof(telefono_actual), "%s", lista[i].telefono);
+                break;
+            }
+        }
+        free(lista);
+    }
+
+    GtkWindow *padre = GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(vista)));
+    GtkWidget *dialogo = gtk_dialog_new_with_buttons(
+        "Editar datos del cliente", padre, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL,
+        "_Guardar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dialogo));
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 12);
+    GtkWidget *e_nombre = gtk_entry_new();
+    GtkWidget *e_tel = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(e_nombre), nombre_actual);
+    gtk_entry_set_text(GTK_ENTRY(e_tel), telefono_actual);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e_tel), "Ej: 58381311 (WhatsApp)");
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Nombre:"), 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_nombre, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Telefono:"), 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), e_tel, 1, 1, 1, 1);
+    gtk_container_add(GTK_CONTAINER(area), grid);
+    gtk_widget_show_all(dialogo);
+
+    for (;;) {
+        if (gtk_dialog_run(GTK_DIALOG(dialogo)) != GTK_RESPONSE_OK) break;
+        const char *nom = gtk_entry_get_text(GTK_ENTRY(e_nombre));
+        const char *tel = gtk_entry_get_text(GTK_ENTRY(e_tel));
+        if (nom[0] == '\0') {
+            mostrar_mensaje(GTK_WINDOW(dialogo), "El nombre no puede quedar vacio.", TRUE);
+            continue;
+        }
+        int digitos = 0;
+        for (const char *p = tel; *p; p++) if (*p >= '0' && *p <= '9') digitos++;
+        if (tel[0] != '\0' && digitos < 8) {
+            mostrar_mensaje(GTK_WINDOW(dialogo), "El telefono debe tener minimo 8 digitos.", TRUE);
+            continue;
+        }
+        /* Contrasena vacia = no se cambia. */
+        if (cliente_actualizar(id_cliente, nom, "") != 0) {
+            mostrar_mensaje(GTK_WINDOW(dialogo), "No se pudo guardar el nombre.", TRUE);
+            continue;
+        }
+        if (tel[0] != '\0' && strcmp(tel, telefono_actual) != 0
+            && cliente_actualizar_telefono(id_cliente, tel) != 0) {
+            mostrar_mensaje(GTK_WINDOW(dialogo), "Se guardo el nombre, pero no el telefono.", TRUE);
+            gtk_list_store_set(GTK_LIST_STORE(modelo), &iter, 1, nom, -1);
+            continue;
+        }
+        gtk_list_store_set(GTK_LIST_STORE(modelo), &iter, 1, nom, -1);
+        mostrar_mensaje(GTK_WINDOW(dialogo), "Datos actualizados.", FALSE);
+        break;
+    }
+    gtk_widget_destroy(dialogo);
+}
+
+static void on_clientes_menu_editar(GtkMenuItem *item, gpointer datos) {
+    (void)item;
+    editar_datos_cliente(GTK_TREE_VIEW(datos));
+}
+
+static void on_clientes_menu_rol(GtkMenuItem *item, gpointer datos) {
+    (void)item;
+    on_cambiar_rol_cliente_clicked(NULL, datos);
+}
+
+static gboolean on_clientes_clic(GtkWidget *vista, GdkEventButton *ev, gpointer datos) {
+    (void)datos;
+    if (ev->type != GDK_BUTTON_PRESS || ev->button != 3) return FALSE;
+    GtkTreePath *ruta = NULL;
+    if (!gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(vista), (gint)ev->x, (gint)ev->y,
+                                       &ruta, NULL, NULL, NULL))
+        return FALSE;
+    gtk_tree_view_set_cursor(GTK_TREE_VIEW(vista), ruta, NULL, FALSE);
+    gtk_tree_path_free(ruta);
+
+    GtkWidget *menu = gtk_menu_new();
+    GtkWidget *it_editar = gtk_menu_item_new_with_label("Editar datos");
+    GtkWidget *it_rol = gtk_menu_item_new_with_label("Cambiar rol");
+    g_signal_connect(it_editar, "activate", G_CALLBACK(on_clientes_menu_editar), vista);
+    g_signal_connect(it_rol, "activate", G_CALLBACK(on_clientes_menu_rol), vista);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), it_editar);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), it_rol);
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)ev);
+    return TRUE;
+}
+
 static void on_administrar_clientes_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     DatosBotonModulo *d = (DatosBotonModulo *)datos;
@@ -5097,6 +5490,8 @@ static void on_administrar_clientes_clicked(GtkButton *boton, gpointer datos) {
     gtk_widget_set_vexpand(scroll, TRUE);
     gtk_container_add(GTK_CONTAINER(scroll), vista);
     gtk_box_pack_start(GTK_BOX(caja), scroll, TRUE, TRUE, 0);
+
+    g_signal_connect(vista, "button-press-event", G_CALLBACK(on_clientes_clic), NULL);
 
     GtkWidget *btn_cambiar = gtk_button_new_with_label("Cambiar rol del seleccionado");
     g_signal_connect(btn_cambiar, "clicked", G_CALLBACK(on_cambiar_rol_cliente_clicked), vista);

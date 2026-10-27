@@ -1268,6 +1268,38 @@ int mascota_actualizar_estado(int id, const char *nuevo_estado) {
     return SQL_SUCCEEDED(ret) ? 0 : -1;
 }
 
+int mascota_actualizar_datos(int id, const char *nombre, const char *especie,
+                              const char *raza, int edad) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) {
+        api_desconectar(henv, hdbc);
+        return -1;
+    }
+    SQLPrepare(hstmt, (SQLCHAR *)
+        "UPDATE mascotas SET nombre=?, especie=?, raza=?, edad=? WHERE id=?;", SQL_NTS);
+
+    char b_nombre[128], b_especie[128], b_raza[128];
+    snprintf(b_nombre, sizeof(b_nombre), "%s", nombre ? nombre : "");
+    snprintf(b_especie, sizeof(b_especie), "%s", especie ? especie : "");
+    snprintf(b_raza, sizeof(b_raza), "%s", raza ? raza : "");
+    SQLINTEGER edad_val = edad, id_val = id;
+    SQLLEN l1 = SQL_NTS, l2 = SQL_NTS, l3 = SQL_NTS;
+
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 127, 0, b_nombre, 0, &l1);
+    SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 127, 0, b_especie, 0, &l2);
+    SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 127, 0, b_raza, 0, &l3);
+    SQLBindParameter(hstmt, 4, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &edad_val, 0, NULL);
+    SQLBindParameter(hstmt, 5, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_val, 0, NULL);
+
+    SQLRETURN ret = SQLExecute(hstmt);
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    api_desconectar(henv, hdbc);
+    return SQL_SUCCEEDED(ret) ? 0 : -1;
+}
+
 int mascota_eliminar(int id) {
     SQLHENV henv; SQLHDBC hdbc;
     if (api_conectar(&henv, &hdbc) != 0) return -1;
