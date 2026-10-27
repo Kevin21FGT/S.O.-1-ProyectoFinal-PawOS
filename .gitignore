@@ -40,3 +40,6 @@ deb-build/
 /pawos-monitor-gui
 /pawos-portal-clientes
 /pawos-archivos-gui
+repomix-output.xml
+/pawos-foto
+*.bak_*
