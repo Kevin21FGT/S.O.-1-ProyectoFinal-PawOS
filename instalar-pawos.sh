@@ -47,6 +47,7 @@ install -m 755 "$BINDIR/pawos-configurar-notificaciones"    /usr/local/bin/pawos
 install -m 755 "$BINDIR/pawos-enviar-correo-cita"            /usr/local/bin/pawos-enviar-correo-cita
 install -m 755 "$BINDIR/pawos-enviar-whatsapp-cita"          /usr/local/bin/pawos-enviar-whatsapp-cita
 install -m 755 "$BINDIR/pawos-generar-pdf-cita.py"           /usr/local/bin/pawos-generar-pdf-cita.py
+install -m 755 "$BINDIR/pawos-generar-pdf-reporte.py"         /usr/local/bin/pawos-generar-pdf-reporte.py
 
 echo "=== 4. Creando script de respaldo a la nube (rclone) ==="
 install -d /usr/local/bin
