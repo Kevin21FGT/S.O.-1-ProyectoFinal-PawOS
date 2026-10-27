@@ -199,6 +199,15 @@ int reporte_generar_adopciones(const char *ruta_salida);
 int reporte_generar_donantes(const char *ruta_salida);
 /* mes = "AAAA-MM" para un solo mes; NULL o "" = todos, agrupado por mes. */
 int reporte_generar_donantes_mes(const char *ruta_salida, const char *mes);
+/* Reportes por mes de vacunas / adopciones / alertas. mes = "AAAA-MM" o NULL/"" = todos. */
+#define REPORTE_VACUNAS    1
+#define REPORTE_ADOPCIONES 2
+#define REPORTE_ALERTAS    3
+int reporte_generar_mensual(const char *ruta_salida, int tipo, const char *mes);
+/* Meses ("AAAA-MM", el mas reciente primero) que tienen registros. Devuelve cuantos. */
+int reporte_listar_meses(int tipo, char (*meses)[8], int max);
+/* Agrega los ultimos 12 meses (hasta hoy) a la lista y la deja del mas reciente al mas antiguo. */
+int reporte_completar_ultimos_meses(char (*meses)[8], int nm, int max);
 /* "2026-10" -> "Octubre 2026" */
 void reporte_mes_legible(const char *ym, char *out, int n);
 int reporte_generar_alertas(const char *ruta_salida);

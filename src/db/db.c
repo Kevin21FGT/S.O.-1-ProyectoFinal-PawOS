@@ -2260,6 +2260,181 @@ void reporte_mes_legible(const char *ym, char *out, int n) {
         snprintf(out, (size_t)n, "%s", ym ? ym : "");
 }
 
+/* ---- Reportes por mes (vacunas, adopciones, alertas) ---- */
+
+typedef struct {
+    char fecha[24];
+    char linea[420];
+    int  pendiente;
+} EntradaReporte;
+
+static int cmp_entrada_reporte(const void *a, const void *b) {
+    const EntradaReporte *x = a, *y = b;
+    int c = strcmp(x->fecha, y->fecha);
+    return c ? c : strcmp(x->linea, y->linea);
+}
+
+static int cargar_entradas_reporte(int tipo, EntradaReporte **out, int *n) {
+    *out = NULL; *n = 0;
+    if (tipo == REPORTE_VACUNAS) {
+        Vacuna *v = NULL; int nv = 0;
+        if (vacuna_listar(&v, &nv) != 0) return -1;
+        EntradaReporte *e = calloc((size_t)nv + 1, sizeof(EntradaReporte));
+        for (int i = 0; i < nv; i++) {
+            snprintf(e[i].fecha, sizeof(e[i].fecha), "%s", v[i].fecha_aplicacion);
+            snprintf(e[i].linea, sizeof(e[i].linea),
+                     "  Mascota #%d - %s | aplicada: %s | proxima: %s%s%s",
+                     v[i].mascota_id, v[i].nombre_vacuna, v[i].fecha_aplicacion, v[i].fecha_proxima,
+                     v[i].observaciones[0] ? " | obs: " : "", v[i].observaciones[0] ? v[i].observaciones : "");
+        }
+        free(v); *out = e; *n = nv;
+        return 0;
+    }
+    if (tipo == REPORTE_ADOPCIONES) {
+        Adopcion *a = NULL; int na = 0;
+        if (adopcion_listar(&a, &na) != 0) return -1;
+        EntradaReporte *e = calloc((size_t)na + 1, sizeof(EntradaReporte));
+        for (int i = 0; i < na; i++) {
+            snprintf(e[i].fecha, sizeof(e[i].fecha), "%s", a[i].fecha_adopcion);
+            snprintf(e[i].linea, sizeof(e[i].linea),
+                     "  Mascota #%d -> %s (contacto: %s), fecha: %s",
+                     a[i].mascota_id, a[i].adoptante_nombre, a[i].adoptante_contacto, a[i].fecha_adopcion);
+        }
+        free(a); *out = e; *n = na;
+        return 0;
+    }
+    if (tipo == REPORTE_ALERTAS) {
+        Alerta *al = NULL; int nal = 0;
+        if (alerta_listar(&al, &nal) != 0) return -1;
+        EntradaReporte *e = calloc((size_t)nal + 1, sizeof(EntradaReporte));
+        for (int i = 0; i < nal; i++) {
+            snprintf(e[i].fecha, sizeof(e[i].fecha), "%s", al[i].fecha_hora);
+            snprintf(e[i].linea, sizeof(e[i].linea),
+                     "  [%s] animal %s - %s: %s (valor: %.2f) - %s",
+                     al[i].fecha_hora, al[i].animal_id, al[i].tipo, al[i].detalle, al[i].valor,
+                     al[i].atendida ? "atendida" : "pendiente");
+            e[i].pendiente = !al[i].atendida;
+        }
+        free(al); *out = e; *n = nal;
+        return 0;
+    }
+    return -1;
+}
+
+int reporte_completar_ultimos_meses(char (*meses)[8], int nm, int max) {
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    int anio = tmv.tm_year + 1900, mes = tmv.tm_mon + 1;
+    for (int k = 0; k < 12; k++) {
+        char ym[16];
+        snprintf(ym, sizeof(ym), "%04d-%02d", anio, mes);
+        int ya = 0;
+        for (int i = 0; i < nm; i++) if (strcmp(meses[i], ym) == 0) { ya = 1; break; }
+        if (!ya && nm < max) { memcpy(meses[nm], ym, 8); nm++; }
+        if (--mes == 0) { mes = 12; anio--; }
+    }
+    for (int a = 0; a < nm; a++)
+        for (int b = a + 1; b < nm; b++)
+            if (strcmp(meses[a], meses[b]) < 0) {
+                char tmp[8]; memcpy(tmp, meses[a], 8);
+                memcpy(meses[a], meses[b], 8); memcpy(meses[b], tmp, 8);
+            }
+    return nm;
+}
+
+int reporte_listar_meses(int tipo, char (*meses)[8], int max) {
+    EntradaReporte *e = NULL; int n = 0;
+    if (cargar_entradas_reporte(tipo, &e, &n) != 0) return 0;
+    int nm = 0;
+    for (int i = 0; i < n && nm < max; i++) {
+        if (strlen(e[i].fecha) < 7) continue;
+        char ym[8];
+        memcpy(ym, e[i].fecha, 7); ym[7] = '\0';
+        int ya = 0;
+        for (int k = 0; k < nm; k++) if (strcmp(meses[k], ym) == 0) { ya = 1; break; }
+        if (!ya) { memcpy(meses[nm], ym, 8); nm++; }
+    }
+    free(e);
+    for (int a = 0; a < nm; a++)
+        for (int b = a + 1; b < nm; b++)
+            if (strcmp(meses[a], meses[b]) < 0) {
+                char tmp[8]; memcpy(tmp, meses[a], 8);
+                memcpy(meses[a], meses[b], 8); memcpy(meses[b], tmp, 8);
+            }
+    return nm;
+}
+
+int reporte_generar_mensual(const char *ruta_salida, int tipo, const char *mes) {
+    const char *titulo, *unidad;
+    if (tipo == REPORTE_VACUNAS)         { titulo = "Vacunas";               unidad = "vacuna(s)"; }
+    else if (tipo == REPORTE_ADOPCIONES) { titulo = "Adopciones";            unidad = "adopcion(es)"; }
+    else if (tipo == REPORTE_ALERTAS)    { titulo = "Alertas de Sensores";   unidad = "alerta(s)"; }
+    else return -1;
+
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    int un_mes = (mes && mes[0]);
+    char legible[40] = "";
+    if (un_mes) reporte_mes_legible(mes, legible, (int)sizeof(legible));
+
+    fprintf(f, "===== Reporte de %s - PawOS =====\n", titulo);
+    fprintf(f, "Periodo: %s\n", un_mes ? legible : "Todos los meses (agrupado por mes)");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    EntradaReporte *e = NULL; int n = 0;
+    if (cargar_entradas_reporte(tipo, &e, &n) != 0) { e = NULL; n = 0; }
+    if (n > 1) qsort(e, (size_t)n, sizeof(EntradaReporte), cmp_entrada_reporte);
+
+    char mes_actual[8] = "";
+    int abierto = 0, cant_mes = 0, pend_mes = 0, cant_total = 0, pend_total = 0;
+
+    for (int i = 0; i < n; i++) {
+        char ym[8] = "";
+        if (strlen(e[i].fecha) >= 7) { memcpy(ym, e[i].fecha, 7); ym[7] = '\0'; }
+        if (un_mes && strcmp(ym, mes) != 0) continue;
+
+        if (!un_mes && (!abierto || strcmp(ym, mes_actual) != 0)) {
+            if (abierto) {
+                fprintf(f, "  Subtotal: %d %s", cant_mes, unidad);
+                if (tipo == REPORTE_ALERTAS) fprintf(f, " - pendientes: %d", pend_mes);
+                fprintf(f, "\n\n");
+            }
+            char etiqueta[40];
+            reporte_mes_legible(ym, etiqueta, (int)sizeof(etiqueta));
+            fprintf(f, "== %s ==\n", ym[0] ? etiqueta : "Sin fecha");
+            snprintf(mes_actual, sizeof(mes_actual), "%s", ym);
+            cant_mes = 0; pend_mes = 0; abierto = 1;
+        }
+
+        fprintf(f, "%s\n", e[i].linea);
+        cant_mes++; cant_total++;
+        if (e[i].pendiente) { pend_mes++; pend_total++; }
+    }
+    if (abierto) {
+        fprintf(f, "  Subtotal: %d %s", cant_mes, unidad);
+        if (tipo == REPORTE_ALERTAS) fprintf(f, " - pendientes: %d", pend_mes);
+        fprintf(f, "\n\n");
+    }
+
+    if (cant_total == 0) {
+        fprintf(f, "No hay registros en este periodo.\n");
+    } else {
+        fprintf(f, "%s: %d %s", un_mes ? "TOTAL DEL MES" : "TOTAL GENERAL", cant_total, unidad);
+        if (tipo == REPORTE_ALERTAS) fprintf(f, " - pendientes: %d", pend_total);
+        fprintf(f, "\n");
+    }
+
+    free(e);
+    fclose(f);
+    return 0;
+}
+
 static int cmp_donante_fecha(const void *a, const void *b) {
     const Donante *x = a, *y = b;
     int c = strcmp(x->fecha, y->fecha);

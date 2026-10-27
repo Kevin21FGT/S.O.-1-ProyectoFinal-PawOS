@@ -3236,6 +3236,8 @@ static gboolean pedir_mes_donantes(GtkWindow *padre, char *out, size_t n_out) {
                 memcpy(meses[a], meses[b], 8); memcpy(meses[b], tmp, 8);
             }
 
+    nm = reporte_completar_ultimos_meses(meses, nm, 120);
+
     GtkWidget *dlg = gtk_dialog_new_with_buttons(
         "Reporte de donantes", padre, GTK_DIALOG_MODAL,
         "_Cancelar", GTK_RESPONSE_CANCEL, "_Generar", GTK_RESPONSE_OK, NULL);
@@ -3266,9 +3268,50 @@ static gboolean pedir_mes_donantes(GtkWindow *padre, char *out, size_t n_out) {
     return ok;
 }
 
-static int generar_reporte_categoria(DatosReporteCategoria *d, gboolean es_donantes,
+/* Igual que pedir_mes_donantes pero para vacunas, adopciones y alertas. */
+static gboolean pedir_mes_reporte(GtkWindow *padre, int tipo, const char *titulo_tipo,
+                                  char *out, size_t n_out) {
+    char meses[120][8];
+    int nm = reporte_listar_meses(tipo, meses, 120);
+    nm = reporte_completar_ultimos_meses(meses, nm, 120);
+
+    char titulo_dlg[96];
+    snprintf(titulo_dlg, sizeof(titulo_dlg), "Reporte de %s", titulo_tipo);
+    GtkWidget *dlg = gtk_dialog_new_with_buttons(
+        titulo_dlg, padre, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL, "_Generar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
+    GtkWidget *lbl = gtk_label_new("De que mes quieres el reporte?");
+    gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl, FALSE, FALSE, 0);
+    GtkWidget *combo = gtk_combo_box_text_new();
+    for (int i = 0; i < nm; i++) {
+        char legible[40];
+        reporte_mes_legible(meses[i], legible, (int)sizeof(legible));
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), meses[i], legible);
+    }
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "", "Todos los meses (agrupado por mes)");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+    gtk_box_pack_start(GTK_BOX(caja), combo, FALSE, FALSE, 0);
+    gtk_container_add(GTK_CONTAINER(area), caja);
+    gtk_widget_show_all(dlg);
+
+    gboolean ok = (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_OK);
+    if (ok) {
+        const gchar *id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo));
+        snprintf(out, n_out, "%s", id ? id : "");
+    }
+    gtk_widget_destroy(dlg);
+    return ok;
+}
+
+static int generar_reporte_categoria(DatosReporteCategoria *d, gboolean es_donantes, int tipo_mes,
                                      const char *mes, const char *ruta) {
-    return es_donantes ? reporte_generar_donantes_mes(ruta, mes) : d->generador(ruta);
+    if (es_donantes) return reporte_generar_donantes_mes(ruta, mes);
+    if (tipo_mes) return reporte_generar_mensual(ruta, tipo_mes, mes);
+    return d->generador(ruta);
 }
 
 static void on_generar_reporte_categoria_clicked(GtkButton *boton, gpointer datos) {
@@ -3278,20 +3321,26 @@ static void on_generar_reporte_categoria_clicked(GtkButton *boton, gpointer dato
 
     char mes_sel[8] = "";
     gboolean es_donantes = (d->generador == reporte_generar_donantes);
+    int tipo_mes = (d->generador == reporte_generar_vacunas)    ? REPORTE_VACUNAS :
+                   (d->generador == reporte_generar_adopciones) ? REPORTE_ADOPCIONES :
+                   (d->generador == reporte_generar_alertas)    ? REPORTE_ALERTAS : 0;
     if (es_donantes && !pedir_mes_donantes(GTK_WINDOW(ctx->ventana), mes_sel, sizeof(mes_sel)))
+        return;
+    if (tipo_mes && !pedir_mes_reporte(GTK_WINDOW(ctx->ventana), tipo_mes, d->nombre_tipo,
+                                       mes_sel, sizeof(mes_sel)))
         return;
     char tipo_txt[96];
     snprintf(tipo_txt, sizeof(tipo_txt), "%s", d->nombre_tipo);
-    if (es_donantes && mes_sel[0]) {
+    if ((es_donantes || tipo_mes) && mes_sel[0]) {
         char legible[40];
         reporte_mes_legible(mes_sel, legible, (int)sizeof(legible));
-        snprintf(tipo_txt, sizeof(tipo_txt), "Donantes (%s)", legible);
+        snprintf(tipo_txt, sizeof(tipo_txt), "%s (%s)", d->nombre_tipo, legible);
     }
 
     const char *ruta_usada = NULL;
-    if (generar_reporte_categoria(d, es_donantes, mes_sel, d->ruta_fija) == 0) {
+    if (generar_reporte_categoria(d, es_donantes, tipo_mes, mes_sel, d->ruta_fija) == 0) {
         ruta_usada = d->ruta_fija;
-    } else if (generar_reporte_categoria(d, es_donantes, mes_sel, d->ruta_relativa) == 0) {
+    } else if (generar_reporte_categoria(d, es_donantes, tipo_mes, mes_sel, d->ruta_relativa) == 0) {
         ruta_usada = d->ruta_relativa;
     }
 
