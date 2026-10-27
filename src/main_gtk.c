@@ -536,7 +536,7 @@ static void aplicar_estilos(void) {
          * al panel de contenido claro. */
         ".pawos-sidebar {"
         "  background-image: linear-gradient(180deg, #23924B 0%%, #12451F 100%%);"
-        "  padding: 22px 16px;"
+        "  padding: 14px 16px;"
         "}"
         ".pawos-sidebar label { color: #FFFFFF; }"
         ".pawos-sidebar-titulo { color: #FFFFFF; }"
@@ -548,7 +548,7 @@ static void aplicar_estilos(void) {
         "  box-shadow: none;"
         "  border-radius: 8px;"
         "  font-weight: normal;"
-        "  padding: 8px 10px;"
+        "  padding: 3px 10px;"
         "}"
         ".pawos-nav-item:hover {"
         "  background-color: rgba(255,255,255,0.16);"
@@ -5631,7 +5631,15 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     GtkWidget *barra_lateral = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_style_context_add_class(gtk_widget_get_style_context(barra_lateral), "pawos-sidebar");
     gtk_widget_set_size_request(barra_lateral, 260, -1);
-    gtk_box_pack_start(GTK_BOX(caja_raiz), barra_lateral, FALSE, FALSE, 0);
+    {
+        /* pawos-scroll-lateral: solo muestra barra de scroll si no cabe */
+        GtkWidget *scroll_lateral = gtk_scrolled_window_new(NULL, NULL);
+        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_lateral),
+                                       GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+        gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(scroll_lateral), GTK_SHADOW_NONE);
+        gtk_container_add(GTK_CONTAINER(scroll_lateral), barra_lateral);
+        gtk_box_pack_start(GTK_BOX(caja_raiz), scroll_lateral, FALSE, FALSE, 0);
+    }
 
     GtkWidget *lbl_logo = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(lbl_logo), "<span size='large' weight='bold'>\xF0\x9F\x90\xBE PawOS Refugio</span>");
@@ -5644,7 +5652,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     gtk_label_set_markup(GTK_LABEL(lbl_version), markup_version);
     g_free(markup_version);
     gtk_widget_set_halign(lbl_version, GTK_ALIGN_START);
-    gtk_widget_set_margin_bottom(lbl_version, 14);
+    gtk_widget_set_margin_bottom(lbl_version, 6);
     gtk_style_context_add_class(gtk_widget_get_style_context(lbl_version), "subtitulo-banner");
     gtk_box_pack_start(GTK_BOX(barra_lateral), lbl_version, FALSE, FALSE, 0);
 
@@ -5731,7 +5739,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
             g_free(marcado);
             gtk_style_context_add_class(gtk_widget_get_style_context(encabezado), "encabezado-seccion");
             gtk_widget_set_halign(encabezado, GTK_ALIGN_START);
-            gtk_widget_set_margin_top(encabezado, primera_seccion ? 4 : 16);
+            gtk_widget_set_margin_top(encabezado, primera_seccion ? 2 : 8);
             gtk_widget_set_margin_bottom(encabezado, 4);
             gtk_box_pack_start(GTK_BOX(barra_lateral), encabezado, FALSE, FALSE, 0);
             primera_seccion = FALSE;
@@ -5740,7 +5748,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
         gchar *etiqueta = g_strdup_printf("%s  %s", iconos_modulos[i], nombres_modulos[i]);
         GtkWidget *boton = gtk_button_new_with_label(etiqueta);
         g_free(etiqueta);
-        gtk_widget_set_size_request(boton, -1, 40);
+        gtk_widget_set_size_request(boton, -1, 32);
         gtk_widget_set_halign(gtk_bin_get_child(GTK_BIN(boton)), GTK_ALIGN_START);
         gtk_style_context_add_class(gtk_widget_get_style_context(boton), "pawos-nav-item");
         gtk_box_pack_start(GTK_BOX(barra_lateral), boton, FALSE, FALSE, 0);
@@ -5767,7 +5775,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     gtk_box_pack_start(GTK_BOX(barra_lateral), encabezado_cuenta, FALSE, FALSE, 0);
 
     GtkWidget *btn_actualizar = gtk_button_new_with_label("\xF0\x9F\x94\x84  Buscar Actualizaciones");
-    gtk_widget_set_size_request(btn_actualizar, -1, 40);
+    gtk_widget_set_size_request(btn_actualizar, -1, 32);
     gtk_widget_set_halign(gtk_bin_get_child(GTK_BIN(btn_actualizar)), GTK_ALIGN_START);
     gtk_style_context_add_class(gtk_widget_get_style_context(btn_actualizar), "pawos-nav-item");
     gtk_widget_set_tooltip_text(btn_actualizar, "Busca la ultima version en GitHub y la instala.");
@@ -5775,7 +5783,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
     g_signal_connect(btn_actualizar, "clicked", G_CALLBACK(on_actualizar_clicked), datos_botones);
 
     GtkWidget *btn_acerca_de = gtk_button_new_with_label("Acerca de");
-    gtk_widget_set_size_request(btn_acerca_de, -1, 40);
+    gtk_widget_set_size_request(btn_acerca_de, -1, 32);
     gtk_widget_set_halign(gtk_bin_get_child(GTK_BIN(btn_acerca_de)), GTK_ALIGN_START);
     gtk_style_context_add_class(gtk_widget_get_style_context(btn_acerca_de), "pawos-nav-item");
     gtk_box_pack_start(GTK_BOX(barra_lateral), btn_acerca_de, FALSE, FALSE, 0);
@@ -5783,7 +5791,7 @@ static void construir_ventana_principal(Rol rol, const char *usuario) {
 
     GtkWidget *btn_salir = gtk_button_new_with_label("Salir");
     gtk_style_context_add_class(gtk_widget_get_style_context(btn_salir), "salir");
-    gtk_widget_set_size_request(btn_salir, -1, 40);
+    gtk_widget_set_size_request(btn_salir, -1, 32);
     gtk_widget_set_halign(gtk_bin_get_child(GTK_BIN(btn_salir)), GTK_ALIGN_START);
     gtk_widget_set_margin_top(btn_salir, 6);
     gtk_box_pack_start(GTK_BOX(barra_lateral), btn_salir, FALSE, FALSE, 0);
