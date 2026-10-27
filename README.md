@@ -273,6 +273,68 @@ USUARIO=db_xxxxxx_pawos_admin
 - **Cuenta actual:** los valores por defecto apuntan a la cuenta de paga del equipo (`sql8011.site4now.net`, base `db_acf53d_pawos`). La cuenta anterior quedó suspendida y ya no se usa.
 - **Fotos:** se guardan como texto base64 en columnas `foto_base64` (mascotas y clientes).
 
+<!-- readme-cadena-conexion -->
+
+### Cadena de conexión
+
+`api_conectar()` en `src/db/db.c` arma la cadena ODBC con estos datos (la contraseña va aparte y **no se escribe en el repositorio**):
+
+| Dato | Valor por defecto | Dónde se define |
+|---|---|---|
+| Servidor | `sql8011.site4now.net` | `API_SQL_SERVIDOR` |
+| Puerto | `1433` | `API_SQL_PUERTO` |
+| Base de datos | `db_acf53d_pawos` | `API_SQL_BASE` |
+| Usuario | `db_acf53d_pawos_admin` | `API_SQL_USUARIO` |
+| Contraseña | *(no está en el código)* | archivo `~/.pawos_db_remota` |
+
+```
+DRIVER={FreeTDS};SERVER=sql8011.site4now.net;PORT=1433;DATABASE=db_acf53d_pawos;UID=db_acf53d_pawos_admin;PWD=<contraseña de ~/.pawos_db_remota>;TDS_Version=7.4;
+```
+
+Orden de prioridad de los datos: primero lo que diga `~/.pawos_db_config` (si existe), y si falta una clave se usa el valor por defecto de `db.c`. La contraseña siempre sale de `~/.pawos_db_remota` (una sola línea, sin espacios al final).
+
+> **Importante:** este repositorio es público. El nombre del servidor, la base y el usuario no son secretos por sí solos, pero la contraseña sí lo es: nunca se sube a GitHub, ni se pega en el grupo del equipo ni en capturas. Se comparte solo por un canal privado.
+
+### Poner en marcha la conexión en una computadora nueva
+
+1. Instalar las dependencias (el `.deb` ya las instala; si se compila desde el código):
+
+   ```
+   sudo apt install unixodbc tdsodbc freetds-bin
+   ```
+
+2. Crear el archivo de la contraseña (reemplazar el texto por la contraseña real) y dejarlo legible solo por el usuario:
+
+   ```
+   echo "LA_CONTRASENA" > ~/.pawos_db_remota
+   chmod 600 ~/.pawos_db_remota
+   ```
+
+3. Solo si cambió el servidor, la base o el usuario, crear `~/.pawos_db_config` con las claves que cambien (`SERVIDOR`, `PUERTO`, `BASE`, `USUARIO`, una por línea). No hace falta recompilar.
+4. Para los servicios que corren como `root` (por ejemplo `pawos-monitoreo`, que recibe las alertas del ESP32), el archivo debe existir también en `/root/.pawos_db_remota`.
+5. Comprobar que conecta (pide la contraseña en pantalla, sin dejarla en el historial):
+
+   ```
+   tsql -H sql8011.site4now.net -p 1433 -U db_acf53d_pawos_admin -D db_acf53d_pawos
+   ```
+
+   Si entra, probar `SELECT COUNT(*) FROM mascotas;` seguido de `GO`, y salir con `exit`. Después abrir `./pawos-refugio-gui`: si la lista de mascotas carga, la conexión funciona.
+
+### Cambiar la contraseña de la base
+
+1. En el panel de SmarterASP.NET (SQL Server de la cuenta), cambiar la contraseña del usuario de la base.
+2. En **cada** computadora y servicio que use la base, actualizar `~/.pawos_db_remota` (y `/root/.pawos_db_remota` donde corra un servicio). No hay que recompilar ni reinstalar nada.
+
+### Errores comunes
+
+| Síntoma | Causa probable |
+|---|---|
+| `Login failed for user` | Contraseña incorrecta o con salto de línea o espacio de más en `~/.pawos_db_remota`. |
+| El programa abre pero las listas salen vacías o con error de BD | Falta el archivo `~/.pawos_db_remota` (cada usuario de la computadora necesita el suyo). |
+| `Data source name not found` o `Can't open lib` | Falta `tdsodbc` o el driver `FreeTDS` no está registrado (`odbcinst -q -d` debe listar `[FreeTDS]`). |
+| Se demora y termina en tiempo agotado | Sin internet, o el servidor de SmarterASP bloqueando la IP. Probar `ping sql8011.site4now.net`. |
+| Funciona en la VM pero no en el servicio `pawos-monitoreo` | El servicio corre como `root` y le falta `/root/.pawos_db_remota`. |
+
 ## Módulos del programa
 
 ### Gestión de mascotas, vacunas, adopciones, donantes y reportes
