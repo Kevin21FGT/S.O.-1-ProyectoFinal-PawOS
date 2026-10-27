@@ -1463,6 +1463,73 @@ static void on_respaldar_clicked(GtkButton *btn, gpointer datos) {
     strftime(fecha_texto, sizeof(fecha_texto), "%Y-%m-%d %H:%M:%S", &tmv);
     strftime(sugerido, sizeof(sugerido), "Respaldo_%Y-%m-%d_%H-%M", &tmv);
 
+    /* Que respaldar. Todo marcado = igual que antes. */
+    gboolean sel[N_TABLAS_RESPALDO];
+    gboolean sel_fotos = TRUE, sel_sqlite = TRUE;
+    int n_sel_tablas = 0;
+    {
+        static const char *const nombres_bonitos[] = {
+            "Mascotas", "Vacunas", "Adopciones", "Donantes",
+            "Alertas de sensores", "Clientes", "Notas del veterinario"
+        };
+        GtkWidget *dlg_sel = gtk_dialog_new_with_buttons(
+            "Que quieres respaldar?", GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
+            "_Cancelar", GTK_RESPONSE_CANCEL, "_Continuar", GTK_RESPONSE_OK, NULL);
+        GtkWidget *area_sel = gtk_dialog_get_content_area(GTK_DIALOG(dlg_sel));
+        GtkWidget *caja_sel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+        gtk_container_set_border_width(GTK_CONTAINER(caja_sel), 14);
+        GtkWidget *lbl_sel = gtk_label_new(
+            "Marca lo que quieres incluir.\nCon todo marcado se respalda todo, como siempre.");
+        gtk_widget_set_halign(lbl_sel, GTK_ALIGN_START);
+        gtk_box_pack_start(GTK_BOX(caja_sel), lbl_sel, FALSE, FALSE, 4);
+        GtkWidget *chk_tabla[N_TABLAS_RESPALDO];
+        for (int i = 0; i < N_TABLAS_RESPALDO; i++) {
+            chk_tabla[i] = gtk_check_button_new_with_label(
+                i < 7 ? nombres_bonitos[i] : TABLAS_RESPALDO[i].tabla);
+            gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(chk_tabla[i]), TRUE);
+            gtk_box_pack_start(GTK_BOX(caja_sel), chk_tabla[i], FALSE, FALSE, 0);
+        }
+        GtkWidget *chk_fotos_w = gtk_check_button_new_with_label("Fotos de las mascotas (archivos .jpg)");
+        GtkWidget *chk_sqlite_w = gtk_check_button_new_with_label("Base local de usuarios del personal (SQLite)");
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(chk_fotos_w), TRUE);
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(chk_sqlite_w), TRUE);
+        gtk_box_pack_start(GTK_BOX(caja_sel), chk_fotos_w, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(caja_sel), chk_sqlite_w, FALSE, FALSE, 0);
+        gtk_container_add(GTK_CONTAINER(area_sel), caja_sel);
+        gtk_widget_show_all(dlg_sel);
+
+        for (;;) {
+            if (gtk_dialog_run(GTK_DIALOG(dlg_sel)) != GTK_RESPONSE_OK) {
+                gtk_widget_destroy(dlg_sel);
+                return;
+            }
+            n_sel_tablas = 0;
+            for (int i = 0; i < N_TABLAS_RESPALDO; i++) {
+                sel[i] = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(chk_tabla[i]));
+                if (sel[i]) n_sel_tablas++;
+            }
+            sel_fotos = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(chk_fotos_w));
+            sel_sqlite = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(chk_sqlite_w));
+            if (n_sel_tablas + (sel_fotos ? 1 : 0) + (sel_sqlite ? 1 : 0) > 0) break;
+            mostrar_mensaje(GTK_WINDOW(dlg_sel), "Marca al menos una opcion.", TRUE);
+        }
+        gtk_widget_destroy(dlg_sel);
+
+        /* Una sola cosa elegida: el nombre sugerido la incluye. */
+        int total_sel = n_sel_tablas + (sel_fotos ? 1 : 0) + (sel_sqlite ? 1 : 0);
+        if (total_sel == 1) {
+            const char *que = "usuarios";
+            if (n_sel_tablas == 1) {
+                for (int i = 0; i < N_TABLAS_RESPALDO; i++) if (sel[i]) que = TABLAS_RESPALDO[i].tabla;
+            } else if (sel_fotos) {
+                que = "fotos";
+            }
+            char fecha_sug[32];
+            strftime(fecha_sug, sizeof(fecha_sug), "%Y-%m-%d_%H-%M", &tmv);
+            snprintf(sugerido, sizeof(sugerido), "Respaldo_%s_%s", que, fecha_sug);
+        }
+    }
+
     gboolean reemplazar = FALSE;
     gboolean ya_elegido = FALSE;
 
@@ -1501,12 +1568,14 @@ static void on_respaldar_clicked(GtkButton *btn, gpointer datos) {
     const char *fallo = NULL;
     int leidas = 0;
     for (int i = 0; i < N_TABLAS_RESPALDO; i++) {
+        csvs[i] = NULL;
+        if (!sel[i]) { leidas++; continue; }
         csvs[i] = TABLAS_RESPALDO[i].generar();
         if (!csvs[i]) { fallo = TABLAS_RESPALDO[i].tabla; break; }
         leidas++;
     }
     if (fallo) {
-        for (int i = 0; i < leidas; i++) g_string_free(csvs[i], TRUE);
+        for (int i = 0; i < leidas; i++) if (csvs[i]) g_string_free(csvs[i], TRUE);
         gchar *msg = g_strdup_printf(
             "No se pudo leer la tabla \"%s\" del SQL Server. Revisa la conexion e intenta de nuevo.", fallo);
         mostrar_mensaje(GTK_WINDOW(ctx->ventana), msg, TRUE);
@@ -1523,6 +1592,7 @@ static void on_respaldar_clicked(GtkButton *btn, gpointer datos) {
     int locales = 0, remotos = 0;
     for (int i = 0; i < N_TABLAS_RESPALDO; i++) {
         (void)sello;
+        if (!csvs[i]) continue;
         gchar *nombre = g_strdup_printf("%s.csv", TABLAS_RESPALDO[i].tabla);
         gchar *ruta = g_build_filename(archivos_ruta_base(), "backups", carpeta, nombre, NULL);
         if (g_file_set_contents(ruta, csvs[i]->str, (gssize)csvs[i]->len, NULL)) locales++;
@@ -1536,26 +1606,29 @@ static void on_respaldar_clicked(GtkButton *btn, gpointer datos) {
     int fotos_exportadas = 0;
     {
         gchar *dir_fotos = g_build_filename(archivos_ruta_base(), "backups", carpeta, "fotos_mascotas", NULL);
-        fotos_exportadas = exportar_fotos_mascotas(dir_fotos);
+        fotos_exportadas = sel_fotos ? exportar_fotos_mascotas(dir_fotos) : -1;
         g_free(dir_fotos);
     }
 
     /* 3. Copia del SQLite local (usuarios del personal), como antes. */
-    int sqlite_ok = (archivos_respaldar_bd_auto() == 0);
+    int sqlite_ok = sel_sqlite ? (archivos_respaldar_bd_auto() == 0) : -1;
 
     cargar_categorias(ctx);
 
     GString *msg = g_string_new("Respaldo terminado.\n\n");
-    g_string_append_printf(msg, "- Archivos CSV en Backups/%s: %d de %d\n", carpeta, locales, N_TABLAS_RESPALDO);
+    if (n_sel_tablas > 0)
+        g_string_append_printf(msg, "- Archivos CSV en Backups/%s: %d de %d\n", carpeta, locales, n_sel_tablas);
     if (fotos_exportadas >= 0)
         g_string_append_printf(msg, "- Fotos de mascotas (Backups/%s/fotos_mascotas): %d\n", carpeta, fotos_exportadas);
-    g_string_append_printf(msg, "- Copia en SmarterASP (tabla respaldos): %d de %d\n", remotos, N_TABLAS_RESPALDO);
-    g_string_append_printf(msg, "- Base local de usuarios (SQLite): %s", sqlite_ok ? "copiada" : "no se pudo copiar");
-    if (remotos < N_TABLAS_RESPALDO) {
+    if (n_sel_tablas > 0)
+        g_string_append_printf(msg, "- Copia en SmarterASP (tabla respaldos): %d de %d\n", remotos, n_sel_tablas);
+    if (sqlite_ok >= 0)
+        g_string_append_printf(msg, "- Base local de usuarios (SQLite): %s", sqlite_ok ? "copiada" : "no se pudo copiar");
+    if (n_sel_tablas > 0 && remotos < n_sel_tablas) {
         g_string_append(msg, "\n\nSi la copia en SmarterASP salio en 0, revisa que exista la tabla \"respaldos\".");
     }
     mostrar_mensaje(GTK_WINDOW(ctx->ventana), msg->str,
-        locales < N_TABLAS_RESPALDO && remotos < N_TABLAS_RESPALDO);
+        n_sel_tablas > 0 && locales < n_sel_tablas && remotos < n_sel_tablas);
     g_string_free(msg, TRUE);
     if (btn) gtk_widget_set_sensitive(GTK_WIDGET(btn), TRUE);
 }
