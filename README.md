@@ -160,7 +160,7 @@ S.O.-1-ProyectoFinal-PawOS/
 ├── pawos-actualizar-gui          # actualizador del boton "Buscar Actualizaciones"
 ├── pawos-notificar-cita, pawos-enviar-correo-cita, pawos-enviar-whatsapp-cita,
 │   pawos-generar-pdf-cita.py, pawos-configurar-notificaciones     # recordatorios de citas
-├── pawos-enviar-documento, pawos-generar-pdf-documento.py          # PDF de carnet, comprobantes y reportes
+├── pawos-enviar-documento, pawos-generar-pdf-documento.py, pawos-generar-pdf-reporte.py   # PDF de carnet, comprobantes y reportes
 ├── include/                      # headers
 ├── src/                          # codigo fuente (db/, auth/, archivos/, integridad/, procesos/, memoria/, ui/ ...)
 ├── branding/  live-build-config/  # personalizacion visual y configuracion de la ISO
@@ -364,16 +364,49 @@ Desde v1.18 los módulos ya no abren ventanas emergentes encima: se dibujan en e
 - Menú lateral organizado en secciones: *Atención al refugio*, *Gestión y administración*, *Sistema* y *Cuenta* (Buscar Actualizaciones, Acerca de, Salir).
 - **Maximizar y redimensionar:** se corrigió el botón de maximizar (tipo de ventana y comparación contra el tamaño real del monitor).
 - **Rol y permisos:** cada módulo se muestra u oculta con `modulo_permitido(rol, indice)`; las acciones sin permiso aparecen deshabilitadas, no ocultas.
-- **Pendientes de diseño:** evitar el scroll del menú lateral y el espacio vacío al maximizar.
+- **Menú lateral compacto:** los 12 módulos caben sin scroll; el menú va dentro de un área con scroll que solo aparece en pantallas muy bajas.
 
 ## Reportes
 
-El módulo **Reportes** de PawOS Refugio genera un resumen del refugio como archivo.
+El módulo **Reportes** de PawOS Refugio (panel embebido, visible para Administrador y Veterinario) genera resúmenes del refugio y los muestra en pantalla antes de guardarlos o enviarlos. <!-- readme-reportes -->
 
-- **Por categoría:** se elige qué incluir (mascotas, vacunas, adopciones, donantes, etc.).
-- **Historial de reportes:** cada reporte generado queda guardado y se puede volver a abrir (carpeta `reportes` de PawOS Archivos).
-- **Guardar como:** `.txt` o `.pdf`, con un diálogo para elegir dónde guardar. El PDF tiene diseño profesional (encabezado de marca, tablas y resumen).
-- **Pendiente:** descargar o enviar el reporte por correo y WhatsApp desde la propia pantalla (hoy eso lo hacen el Portal de Clientes y las notificaciones).
+### Reportes disponibles
+
+- **Generar reporte:** resumen general del refugio.
+- **Por categoría:** Mascotas, Vacunas, Adopciones, Donantes y Alertas de Sensores.
+- **Historial:** cada reporte generado queda registrado y se puede volver a abrir (carpeta `reportes` de PawOS Archivos y `historial_reportes.log`).
+
+### Reportes por mes
+
+Al pulsar **Donantes**, **Vacunas**, **Adopciones** o **Alertas de Sensores** se abre un selector de mes (`pedir_mes_donantes()` y `pedir_mes_reporte()` en `main_gtk.c`). La lista siempre incluye los **últimos 12 meses** (`reporte_completar_ultimos_meses()`, mes y año) más cualquier mes anterior que tenga registros (`reporte_listar_meses()`), y la opción **Todos los meses**.
+
+| Reporte | Se agrupa por | Función |
+|---|---|---|
+| Donantes | fecha de la donación | `reporte_generar_donantes_mes()` |
+| Vacunas | fecha de aplicación | `reporte_generar_mensual(REPORTE_VACUNAS)` |
+| Adopciones | fecha de adopción | `reporte_generar_mensual(REPORTE_ADOPCIONES)` |
+| Alertas | fecha de la alerta (cuenta además las pendientes) | `reporte_generar_mensual(REPORTE_ALERTAS)` |
+| Mascotas | — (estado actual, sin mes) | `reporte_generar_mascotas()` |
+
+- **Un mes:** solo los registros de ese mes y su `TOTAL DEL MES`. Si no hay, el reporte lo dice.
+- **Todos los meses:** agrupado por mes, con subtotal por mes y `TOTAL GENERAL`. Los registros se ordenan por fecha.
+- El mes elegido queda en el título y en el historial (por ejemplo "Donantes (Octubre 2026)").
+- Los reportes originales (`reporte_generar_donantes()`, etc.) siguen existiendo sin cambios; las funciones por mes son nuevas.
+
+### PDF con diseño
+
+**Guardar como (.txt / .pdf)** usa `pawos-generar-pdf-reporte.py` (fpdf2) cuando se elige PDF: lee el texto del reporte y arma encabezado verde con el nombre del refugio, periodo, tarjetas con los totales, una tabla por mes con subtotales, recuadro con el total final y pie con número de página. Reconoce el formato de las cinco categorías y del reporte general; si una línea no coincide, la deja como texto normal. Si el script no está instalado o falla, `escribir_pdf_simple()` (Cairo) genera el PDF sencillo de antes, así que nunca se pierde la función. El script se instala en `/usr/local/bin` (`instalar-pawos.sh` y `construir-deb.sh`).
+
+### Enviar por correo o WhatsApp
+
+Junto a *Guardar como* hay dos botones, **Enviar por correo** y **Enviar por WhatsApp**, activos cuando ya hay un reporte en pantalla:
+
+1. `enviar_reporte()` pide el destino. En WhatsApp, un número de 8 dígitos recibe el prefijo `502`.
+2. Genera el PDF en una carpeta temporal (`g_dir_make_tmp`) con nombre legible, por ejemplo `reporte_de_donantes_octubre_2026.pdf`.
+3. Lo envía con `sudo -n /usr/local/bin/pawos-enviar-documento` (mismas credenciales de `/etc/pawos/notificaciones.conf` y misma regla de sudo que el Portal de Clientes; si falta, avisa que se corra `instalar-documentos.sh`).
+4. Borra el PDF temporal.
+
+Se envía exactamente el reporte que está en pantalla: para mandar una categoría completa se elige **Todos los meses**.
 
 ## Portal de Clientes
 
