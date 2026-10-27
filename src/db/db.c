@@ -1300,6 +1300,65 @@ int mascota_actualizar_datos(int id, const char *nombre, const char *especie,
     return SQL_SUCCEEDED(ret) ? 0 : -1;
 }
 
+static int api_contar_filas(SQLHDBC hdbc, const char *sql, int id) {
+    SQLHSTMT hstmt;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) return -1;
+    SQLPrepare(hstmt, (SQLCHAR *)sql, SQL_NTS);
+    SQLINTEGER id_val = id;
+    SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_val, 0, NULL);
+    int total = -1;
+    if (SQL_SUCCEEDED(SQLExecute(hstmt)) && SQLFetch(hstmt) == SQL_SUCCESS) {
+        SQLINTEGER n = 0;
+        SQLLEN ind = 0;
+        SQLGetData(hstmt, 1, SQL_C_LONG, &n, 0, &ind);
+        total = (int)n;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    return total;
+}
+
+int mascota_contar_dependencias(int id, int *vacunas, int *solicitudes, int *adopciones) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+    int v = api_contar_filas(hdbc, "SELECT COUNT(*) FROM vacunas WHERE mascota_id=?;", id);
+    int s = api_contar_filas(hdbc, "SELECT COUNT(*) FROM solicitudes_adopcion WHERE mascota_id=?;", id);
+    int a = api_contar_filas(hdbc, "SELECT COUNT(*) FROM adopciones WHERE mascota_id=?;", id);
+    api_desconectar(henv, hdbc);
+    if (v < 0 || s < 0 || a < 0) return -1;
+    if (vacunas) *vacunas = v;
+    if (solicitudes) *solicitudes = s;
+    if (adopciones) *adopciones = a;
+    return 0;
+}
+
+/* Borra la mascota y todo lo que depende de ella en UNA transaccion. */
+int mascota_eliminar_completa(int id) {
+    SQLHENV henv; SQLHDBC hdbc;
+    if (api_conectar(&henv, &hdbc) != 0) return -1;
+
+    static const char *sqls[] = {
+        "DELETE FROM vacunas WHERE mascota_id=?;",
+        "DELETE FROM solicitudes_adopcion WHERE mascota_id=?;",
+        "DELETE FROM adopciones WHERE mascota_id=?;",
+        "DELETE FROM mascotas WHERE id=?;"
+    };
+    SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_OFF, 0);
+    int ok = 0;
+    for (int i = 0; i < 4 && ok == 0; i++) {
+        SQLHSTMT hstmt;
+        if (SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hstmt) != SQL_SUCCESS) { ok = -1; break; }
+        SQLPrepare(hstmt, (SQLCHAR *)sqls[i], SQL_NTS);
+        SQLINTEGER id_val = id;
+        SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG, SQL_INTEGER, 0, 0, &id_val, 0, NULL);
+        if (!SQL_SUCCEEDED(SQLExecute(hstmt))) ok = -1;
+        SQLFreeHandle(SQL_HANDLE_STMT, hstmt);
+    }
+    SQLEndTran(SQL_HANDLE_DBC, hdbc, ok == 0 ? SQL_COMMIT : SQL_ROLLBACK);
+    SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_ON, 0);
+    api_desconectar(henv, hdbc);
+    return ok;
+}
+
 int mascota_eliminar(int id) {
     SQLHENV henv; SQLHDBC hdbc;
     if (api_conectar(&henv, &hdbc) != 0) return -1;

@@ -153,6 +153,8 @@ int  mascota_listar(Mascota **out, int *n);
 int  mascota_actualizar_estado(int id, const char *nuevo_estado);
 int  mascota_eliminar(int id);
 int  mascota_buscar_por_id(int id, Mascota *out);
+int  mascota_contar_dependencias(int id, int *vacunas, int *solicitudes, int *adopciones);
+int  mascota_eliminar_completa(int id);
 int  mascota_actualizar_datos(int id, const char *nombre, const char *especie,
                               const char *raza, int edad);
 /* Foto de la mascota: JPEG en base64 (columna foto_base64, SQL Server). */

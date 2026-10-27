@@ -1602,15 +1602,29 @@ static void on_eliminar_clicked(GtkButton *boton, gpointer datos) {
         return;
     }
 
+    int n_vac = 0, n_sol = 0, n_ado = 0;
+    int n_dep = 0;
+    if (mascota_contar_dependencias(id, &n_vac, &n_sol, &n_ado) == 0)
+        n_dep = n_vac + n_sol + n_ado;
+    char texto_confirmar[512];
+    if (n_dep > 0) {
+        snprintf(texto_confirmar, sizeof(texto_confirmar),
+            "La mascota con ID %d tiene registrado: %d vacuna(s), %d solicitud(es) de adopcion y %d adopcion(es).\n"
+            "Si continuas, todo eso tambien se va a borrar.\nEsta accion no se puede deshacer. Continuar?",
+            id, n_vac, n_sol, n_ado);
+    } else {
+        snprintf(texto_confirmar, sizeof(texto_confirmar),
+            "Esta seguro que desea eliminar la mascota con ID %d?\nEsta accion no se puede deshacer.", id);
+    }
     GtkWidget *confirmar = gtk_message_dialog_new(
         GTK_WINDOW(ctx->ventana), GTK_DIALOG_MODAL,
         GTK_MESSAGE_QUESTION, GTK_BUTTONS_YES_NO,
-        "Esta seguro que desea eliminar la mascota con ID %d?\nEsta accion no se puede deshacer.", id);
+        "%s", texto_confirmar);
     int respuesta = gtk_dialog_run(GTK_DIALOG(confirmar));
     gtk_widget_destroy(confirmar);
 
     if (respuesta == GTK_RESPONSE_YES) {
-        if (mascota_eliminar(id) == 0) {
+        if ((n_dep > 0 ? mascota_eliminar_completa(id) : mascota_eliminar(id)) == 0) {
             cargar_mascotas(ctx);
             mostrar_mensaje(GTK_WINDOW(ctx->ventana), "Mascota eliminada.", FALSE);
         } else {
