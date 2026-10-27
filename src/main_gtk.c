@@ -3211,15 +3211,87 @@ typedef struct {
     const char *ruta_relativa;
 } DatosReporteCategoria;
 
+/* Pregunta de que mes es el reporte de donantes. out = "AAAA-MM" o "" (todos).
+ * Devuelve FALSE si se cancela. */
+static gboolean pedir_mes_donantes(GtkWindow *padre, char *out, size_t n_out) {
+    Donante *ds = NULL; int nd = 0;
+    char meses[120][8];
+    int nm = 0;
+    if (donante_listar(&ds, &nd) == 0) {
+        for (int i = 0; i < nd && nm < 120; i++) {
+            if (strlen(ds[i].fecha) < 7) continue;
+            char ym[8];
+            memcpy(ym, ds[i].fecha, 7); ym[7] = '\0';
+            int ya = 0;
+            for (int k = 0; k < nm; k++) if (strcmp(meses[k], ym) == 0) { ya = 1; break; }
+            if (!ya) { memcpy(meses[nm], ym, 8); nm++; }
+        }
+    }
+    free(ds);
+    /* mas reciente primero */
+    for (int a = 0; a < nm; a++)
+        for (int b = a + 1; b < nm; b++)
+            if (strcmp(meses[a], meses[b]) < 0) {
+                char tmp[8]; memcpy(tmp, meses[a], 8);
+                memcpy(meses[a], meses[b], 8); memcpy(meses[b], tmp, 8);
+            }
+
+    GtkWidget *dlg = gtk_dialog_new_with_buttons(
+        "Reporte de donantes", padre, GTK_DIALOG_MODAL,
+        "_Cancelar", GTK_RESPONSE_CANCEL, "_Generar", GTK_RESPONSE_OK, NULL);
+    GtkWidget *area = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+    GtkWidget *caja = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_container_set_border_width(GTK_CONTAINER(caja), 14);
+    GtkWidget *lbl = gtk_label_new("De que mes quieres el reporte de donantes?");
+    gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(caja), lbl, FALSE, FALSE, 0);
+    GtkWidget *combo = gtk_combo_box_text_new();
+    for (int i = 0; i < nm; i++) {
+        char legible[40];
+        reporte_mes_legible(meses[i], legible, (int)sizeof(legible));
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), meses[i], legible);
+    }
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "", "Todos los meses (agrupado por mes)");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+    gtk_box_pack_start(GTK_BOX(caja), combo, FALSE, FALSE, 0);
+    gtk_container_add(GTK_CONTAINER(area), caja);
+    gtk_widget_show_all(dlg);
+
+    gboolean ok = (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_OK);
+    if (ok) {
+        const gchar *id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo));
+        snprintf(out, n_out, "%s", id ? id : "");
+    }
+    gtk_widget_destroy(dlg);
+    return ok;
+}
+
+static int generar_reporte_categoria(DatosReporteCategoria *d, gboolean es_donantes,
+                                     const char *mes, const char *ruta) {
+    return es_donantes ? reporte_generar_donantes_mes(ruta, mes) : d->generador(ruta);
+}
+
 static void on_generar_reporte_categoria_clicked(GtkButton *boton, gpointer datos) {
     (void)boton;
     DatosReporteCategoria *d = (DatosReporteCategoria *)datos;
     ContextoReportes *ctx = d->ctx;
 
+    char mes_sel[8] = "";
+    gboolean es_donantes = (d->generador == reporte_generar_donantes);
+    if (es_donantes && !pedir_mes_donantes(GTK_WINDOW(ctx->ventana), mes_sel, sizeof(mes_sel)))
+        return;
+    char tipo_txt[96];
+    snprintf(tipo_txt, sizeof(tipo_txt), "%s", d->nombre_tipo);
+    if (es_donantes && mes_sel[0]) {
+        char legible[40];
+        reporte_mes_legible(mes_sel, legible, (int)sizeof(legible));
+        snprintf(tipo_txt, sizeof(tipo_txt), "Donantes (%s)", legible);
+    }
+
     const char *ruta_usada = NULL;
-    if (d->generador(d->ruta_fija) == 0) {
+    if (generar_reporte_categoria(d, es_donantes, mes_sel, d->ruta_fija) == 0) {
         ruta_usada = d->ruta_fija;
-    } else if (d->generador(d->ruta_relativa) == 0) {
+    } else if (generar_reporte_categoria(d, es_donantes, mes_sel, d->ruta_relativa) == 0) {
         ruta_usada = d->ruta_relativa;
     }
 
@@ -3231,12 +3303,12 @@ static void on_generar_reporte_categoria_clicked(GtkButton *boton, gpointer dato
     }
 
     char estado_txt[220];
-    snprintf(estado_txt, sizeof(estado_txt), "Reporte de %s generado en: %s", d->nombre_tipo, ruta_usada);
+    snprintf(estado_txt, sizeof(estado_txt), "Reporte de %s generado en: %s", tipo_txt, ruta_usada);
     gtk_label_set_text(GTK_LABEL(ctx->lbl_estado), estado_txt);
     mostrar_contenido_archivo(GTK_TEXT_VIEW(ctx->vista_texto), ruta_usada);
     gtk_widget_set_sensitive(ctx->btn_guardar, TRUE);
 
-    agregar_entrada_historial(ctx, d->nombre_tipo);
+    agregar_entrada_historial(ctx, tipo_txt);
 }
 
 static void abrir_pantalla_reportes(GtkWidget *area_dinamica, GtkWidget *ventana_principal, Rol rol) {

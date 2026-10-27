@@ -197,6 +197,10 @@ int reporte_generar_mascotas(const char *ruta_salida);
 int reporte_generar_vacunas(const char *ruta_salida);
 int reporte_generar_adopciones(const char *ruta_salida);
 int reporte_generar_donantes(const char *ruta_salida);
+/* mes = "AAAA-MM" para un solo mes; NULL o "" = todos, agrupado por mes. */
+int reporte_generar_donantes_mes(const char *ruta_salida, const char *mes);
+/* "2026-10" -> "Octubre 2026" */
+void reporte_mes_legible(const char *ym, char *out, int n);
 int reporte_generar_alertas(const char *ruta_salida);
 
 #endif

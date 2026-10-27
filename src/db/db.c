@@ -2248,6 +2248,84 @@ int reporte_generar_donantes(const char *ruta_salida) {
     return 0;
 }
 
+void reporte_mes_legible(const char *ym, char *out, int n) {
+    static const char *meses[12] = {
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    };
+    int anio = 0, mes = 0;
+    if (ym && sscanf(ym, "%d-%d", &anio, &mes) == 2 && mes >= 1 && mes <= 12)
+        snprintf(out, (size_t)n, "%s %d", meses[mes - 1], anio);
+    else
+        snprintf(out, (size_t)n, "%s", ym ? ym : "");
+}
+
+static int cmp_donante_fecha(const void *a, const void *b) {
+    const Donante *x = a, *y = b;
+    int c = strcmp(x->fecha, y->fecha);
+    return c ? c : (x->id - y->id);
+}
+
+int reporte_generar_donantes_mes(const char *ruta_salida, const char *mes) {
+    FILE *f = fopen(ruta_salida, "w");
+    if (!f) return -1;
+
+    time_t t = time(NULL);
+    struct tm tmv; localtime_r(&t, &tmv);
+    char fecha[32];
+    strftime(fecha, sizeof(fecha), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    int un_mes = (mes && mes[0]);
+    char legible[40];
+    if (un_mes) reporte_mes_legible(mes, legible, (int)sizeof(legible));
+
+    fprintf(f, "===== Reporte de Donantes - PawOS =====\n");
+    fprintf(f, "Periodo: %s\n", un_mes ? legible : "Todos los meses (agrupado por mes)");
+    fprintf(f, "Generado: %s\n\n", fecha);
+
+    Donante *d = NULL; int nd = 0;
+    if (donante_listar(&d, &nd) != 0) { d = NULL; nd = 0; }
+    if (nd > 1) qsort(d, (size_t)nd, sizeof(Donante), cmp_donante_fecha);
+
+    char mes_actual[8] = "";
+    int cant_mes = 0, cant_total = 0;
+    double suma_mes = 0, suma_total = 0;
+    int hay_mes_abierto = 0;
+
+    for (int i = 0; i < nd; i++) {
+        char ym[8] = "";
+        if (strlen(d[i].fecha) >= 7) { memcpy(ym, d[i].fecha, 7); ym[7] = '\0'; }
+        if (un_mes && strcmp(ym, mes) != 0) continue;
+
+        if (!un_mes && strcmp(ym, mes_actual) != 0) {
+            if (hay_mes_abierto)
+                fprintf(f, "  Subtotal: %d donacion(es) - Q%.2f\n\n", cant_mes, suma_mes);
+            char etiqueta[40];
+            reporte_mes_legible(ym, etiqueta, (int)sizeof(etiqueta));
+            fprintf(f, "== %s ==\n", etiqueta);
+            snprintf(mes_actual, sizeof(mes_actual), "%s", ym);
+            cant_mes = 0; suma_mes = 0; hay_mes_abierto = 1;
+        }
+
+        fprintf(f, "  %s (contacto: %s) - Q%.2f - fecha: %s\n",
+                d[i].nombre, d[i].contacto, d[i].monto, d[i].fecha);
+        cant_mes++; suma_mes += d[i].monto;
+        cant_total++; suma_total += d[i].monto;
+    }
+    if (hay_mes_abierto)
+        fprintf(f, "  Subtotal: %d donacion(es) - Q%.2f\n\n", cant_mes, suma_mes);
+
+    if (cant_total == 0)
+        fprintf(f, "No hay donaciones registradas en este periodo.\n");
+    else
+        fprintf(f, "%s: %d donacion(es) - Q%.2f\n",
+                un_mes ? "TOTAL DEL MES" : "TOTAL GENERAL", cant_total, suma_total);
+
+    free(d);
+    fclose(f);
+    return 0;
+}
+
 int reporte_generar_alertas(const char *ruta_salida) {
     FILE *f = fopen(ruta_salida, "w");
     if (!f) return -1;
