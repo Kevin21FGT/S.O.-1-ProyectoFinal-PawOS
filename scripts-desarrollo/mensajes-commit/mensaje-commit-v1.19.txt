@@ -1,0 +1,12 @@
+v1.19: Gestion de Mascotas compartida via SQL Server
+
+- El modulo de Gestion de Mascotas ahora se conecta a una base de
+  datos SQL Server compartida (SmarterASP), en vez de la SQLite
+  local, para que todo el equipo vea y edite los mismos registros.
+- Conexion directa por ODBC/FreeTDS, sin cambiar nombres ni firmas
+  de funciones (main_gtk.c y pantallas.c quedan intactos).
+- El resto de modulos (vacunas, adopciones, donantes, alertas) sigue
+  usando SQLite local sin cambios.
+- El .deb ahora instala automaticamente unixodbc y tdsodbc como
+  dependencias.
+- Actualizacion de version.

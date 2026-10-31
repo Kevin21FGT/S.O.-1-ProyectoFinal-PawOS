@@ -41,7 +41,10 @@ def leer_config():
 
 def limpiar_telefono(telefono):
     """Deja solo digitos (Green API espera el numero sin '+', espacios ni guiones)."""
-    return re.sub(r"\D", "", telefono)
+    numero = re.sub(r"\D", "", telefono)
+    if len(numero) == 8:  # numero local de Guatemala sin codigo de pais
+        numero = "502" + numero
+    return numero
 
 
 def main():

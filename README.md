@@ -6,22 +6,54 @@ PawOS no es una distribución armada desde cero: es Debian 13 oficial, con un pr
 
 ## Índice
 
+
+**Parte 1 — Visión general, requisitos y compilación**
+
 - [De cero a un sistema operativo funcionando](#de-cero-a-un-sistema-operativo-funcionando)
 - [Requisitos del sistema y librerías](#requisitos-del-sistema-y-librerías)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Compilar desde el código fuente](#compilar-desde-el-código-fuente)
+
+**Parte 2 — Usuarios, datos y módulos base**
+
 - [Usuarios y roles](#usuarios-y-roles)
 - [Base de datos](#base-de-datos)
+- [Base de datos compartida (SQL Server)](#base-de-datos-compartida-sql-server)
 - [Módulos del programa](#módulos-del-programa)
+
+**Parte 3 — Apps y funciones del refugio**
+
+- [Las apps de PawOS](#las-apps-de-pawos)
+- [Interfaz de PawOS Refugio: paneles embebidos](#interfaz-de-pawos-refugio-paneles-embebidos)
+- [Reportes](#reportes)
+- [Portal de Clientes](#portal-de-clientes)
+- [Fotos de mascotas](#fotos-de-mascotas)
+- [Notificaciones: correo, WhatsApp y PDF](#notificaciones-correo-whatsapp-y-pdf)
+- [PawOS Archivos y respaldos de datos](#pawos-archivos-y-respaldos-de-datos)
+- [Administrar Colaboradores y asistente de bienvenida](#administrar-colaboradores-y-asistente-de-bienvenida)
+- [Monitoreo del sistema](#monitoreo-del-sistema)
+
+**Parte 4 — Personalización, instalación y distribución**
+
 - [Personalización del sistema (branding)](#personalización-del-sistema-branding)
 - [Instalar PawOS sobre un Debian ya instalado](#instalar-pawos-sobre-un-debian-ya-instalado)
-- [Instalar desde el paquete .deb (companeros de equipo)](#instalar-desde-el-paquete-deb-companeros-de-equipo)
+- [Instalar desde el paquete .deb (compañeros de equipo)](#instalar-desde-el-paquete-deb-compañeros-de-equipo)
 - [Construir la ISO instalable](#construir-la-iso-instalable)
+
+**Parte 5 — Operación, seguridad y respaldos**
+
 - [Servicios del sistema (systemd)](#servicios-del-sistema-systemd)
 - [Actualizaciones automáticas (botón "Buscar Actualizaciones")](#actualizaciones-automáticas-botón-buscar-actualizaciones)
 - [Seguridad — estado actual](#seguridad--estado-actual)
 - [Respaldo en la nube — estado actual](#respaldo-en-la-nube--estado-actual)
+
+**Parte 6 — Historial y checklist del curso**
+
+- [Historial de versiones](#historial-de-versiones)
 - [Requerimientos mínimos del curso — checklist](#requerimientos-mínimos-del-curso--checklist)
+- [Equipo](#equipo)
+
+# Parte 1 — Visión general, requisitos y compilación
 
 ## De cero a un sistema operativo funcionando
 
@@ -115,6 +147,36 @@ S.O.-1-ProyectoFinal-PawOS/
 | `vacunas_demonio.c` | Programa pequeño que revisa vacunas pendientes/vencidas; pensado para correr solo, vía un timer de systemd. |
 | `integridad.c` / `checksum.asm` | Verifica que la base de datos de donantes no haya sido alterada, usando una rutina de checksum escrita en Ensamblador x86-64. |
 
+### Estructura actual del repositorio (desde v1.21)
+
+```
+S.O.-1-ProyectoFinal-PawOS/
+├── Makefile                      # CLI, GUI y las apps nuevas (make gui portal-clientes archivos-gui vacunas-gui)
+├── README.md                     # este manual tecnico
+├── PawOS_Manual_Usuario.docx     # manual de usuario
+├── instalar-pawos.sh             # instala PawOS sobre un Debian ya instalado
+├── instalar-documentos.sh        # instala los scripts de PDF/correo/WhatsApp y su regla de sudoers
+├── construir-deb.sh              # genera el .deb
+├── pawos-actualizar-gui          # actualizador del boton "Buscar Actualizaciones"
+├── pawos-notificar-cita, pawos-enviar-correo-cita, pawos-enviar-whatsapp-cita,
+│   pawos-generar-pdf-cita.py, pawos-configurar-notificaciones     # recordatorios de citas
+├── pawos-enviar-documento, pawos-generar-pdf-documento.py, pawos-generar-pdf-reporte.py   # PDF de carnet, comprobantes y reportes
+├── include/                      # headers
+├── src/                          # codigo fuente (db/, auth/, archivos/, integridad/, procesos/, memoria/, ui/ ...)
+├── branding/  live-build-config/  # personalizacion visual y configuracion de la ISO
+├── scripts/  scripts-desarrollo/  tests/
+```
+
+Archivos fuente agregados desde v1.21:
+
+| Archivo | Qué hace |
+|---|---|
+| `src/main_portal_clientes.c` | Portal de Clientes (app aparte para los clientes del refugio). |
+| `src/main_archivos_gui.c` | PawOS Archivos: explorador por categorías, integridad de donantes y respaldos de datos. |
+| `src/main_foto_cli.c` | `pawos-foto`: fotos de mascotas desde la terminal. |
+| `src/main_vacunas_gui.c` | PawOS Vacunas GUI. |
+| `src/main_monitor_gui.c` | PawOS Monitor (CPU, memoria, swap y disco con gráficas). |
+
 ## Compilar desde el código fuente
 
 Necesitas estar parado en la raíz del repositorio (donde está el `Makefile`).
@@ -139,36 +201,139 @@ Para correrlo directo, sin instalar nada del sistema (útil para probar en tu la
 
 Si no existe `/var/pawos/pawos.db` (por ejemplo, probando fuera de la ISO), el programa usa automáticamente `./pawos.db` en la carpeta actual.
 
+# Parte 2 — Usuarios, datos y módulos base
+
 ## Usuarios y roles
 
-PawOS crea tres usuarios reales de Linux, cada uno en un grupo distinto:
+PawOS maneja **dos tipos de cuentas**, con tablas y programas distintos.
 
-| Usuario | Contraseña | Grupo Linux | Rol dentro del programa |
-|---|---|---|---|
-| `admin_refugio` | `admin123` | `pawos-admin` (+ `sudo`) | Administrador: acceso total, incluye Memoria e instalar el sistema |
-| `veterinario1` | `vet123` | `pawos-veterinario` | Veterinario: acceso a todo lo clínico |
-| `voluntario1` | `vol123` | `pawos-voluntario` | Voluntario: solo ver/registrar mascotas y vacunas |
+### Personal del refugio (PawOS Refugio, CLI y GUI)
 
-**Importante — dos mecanismos de permisos conviven en el código:**
+Se autentican contra la tabla `usuarios` de la base **SQLite local** (`/var/pawos/pawos.db`); la contraseña se guarda como *hash* (`crypt()`, SHA-512), nunca en texto plano (ver [Seguridad — estado actual](#seguridad--estado-actual)). Roles disponibles:
 
-- El **GUI** (`main_gtk.c`) usa `auth.c`, que mira el grupo real de Linux del usuario que inició sesión (`auth_rol_actual()`). Esto es "gestión de usuarios y permisos" a nivel del sistema operativo de verdad.
-- El **CLI** (`main.c`) usa `pantalla_login.c`, que pide usuario/contraseña **dentro del programa** y la verifica contra la tabla `usuarios` de la base de datos (`usuario_autenticar()` en `db.c`) — la contraseña se guarda como *hash* (`crypt()`, SHA-512), nunca en texto plano; ver [Seguridad — estado actual](#seguridad--estado-actual) para el detalle completo.
+| Rol | Qué puede hacer |
+|---|---|
+| Administrador | Todo: incluye Administrar Colaboradores, Administrar Clientes, Configurar Notificaciones, Procesos, Memoria y Respaldo. |
+| Veterinario | Todo lo clínico: mascotas, vacunas (registrar, editar, eliminar), adopciones y aprobar solicitudes del Portal. |
+| Recepcionista | Adopciones y donantes; puede aprobar o rechazar solicitudes de adopción. |
+| Rescatista | Solo Gestión de Mascotas y Alertas de Sensores. |
+| Voluntario | Solo ver y registrar mascotas y vacunas; en el clic derecho de Mascotas puede ver la foto, pero no editar, cambiar estado ni eliminar. |
 
-Es decir, el CLI tiene su propio login independiente del sistema operativo. Funciona, pero es importante saberlo porque significa que hay dos "bases de verdad" distintas para los roles (los grupos de Linux, y la tabla `usuarios`) — quedan sincronizadas manualmente (mismos tres usuarios en ambos lados), no automáticamente.
+- La versión "producto" (`make gui-producto`, y el `.deb`) **no trae cuentas fijas**: el primer Administrador se crea con el asistente de bienvenida, y desde **Administrar Colaboradores** (solo Administrador) se crean los demás (con foto opcional en base64).
+- La versión de desarrollo puede sembrar cuentas de ejemplo (`admin_refugio`, `veterinario1`, `voluntario1`); sus contraseñas iniciales están en el manual de usuario, no en este archivo.
+- A nivel de Linux solo hacen falta dos grupos: `pawos-admin` (respaldos con `sudo`) y `pawos-refugio` (acceso a `/var/pawos` y a los scripts de notificación).
+
+### Clientes (Portal de Clientes y selector de Agenda de Vacunas)
+
+Viven en la tabla `clientes` de **SQL Server compartido** (ver [Base de datos compartida](#base-de-datos-compartida-sql-server)), con contraseña hasheada. Roles de cliente (`RolCliente` en `db.h`):
+
+| Valor | Rol | Nota |
+|---|---|---|
+| 3 | Cliente | Persona normal; es el rol que recibe todo registro nuevo. |
+| 0 | Jefe | Cuentas elevadas por el Administrador. |
+| 1 | Supervisor | Ídem. |
+| 2 | Administrador | Ídem. |
+
+El registro público ya no deja elegir rol. El Administrador lo cambia después desde **Administrar Clientes** (clic derecho → *Cambiar rol*, o el botón de abajo). Las comparaciones de permisos usan igualdad (no `>=`), para que "Cliente" (3) nunca herede permisos de nivel alto.
 
 ## Base de datos
 
-SQLite, un solo archivo (`/var/pawos/pawos.db` en la ISO, o `./pawos.db` en pruebas locales). Tablas principales:
+PawOS usa **dos bases de datos**:
 
-- **mascotas** — nombre, especie, raza, edad, estado (`disponible`/`en_proceso`/`adoptado`/`tratamiento`), fecha de ingreso.
-- **vacunas** — asociada a una mascota, nombre de la vacuna, fecha de aplicación, próxima fecha, observaciones.
-- **adopciones** — asociada a una mascota, datos del adoptante, fecha (al registrarla, marca la mascota como `adoptado`).
-- **donantes** — nombre, contacto, monto donado, fecha.
-- **usuarios** — username, password (guardada como *hash* SHA-512 vía `crypt()`, no en texto plano), rol (usada solo por el login del CLI).
-- **alertas_sensores** — alertas que manda un sensor ESP32 externo (ver más abajo).
-- **notas_veterinario** — notas clínicas libres por mascota.
+1. **SQL Server compartido (SmarterASP.NET)** para los módulos que el equipo comparte: `mascotas`, `vacunas`, `adopciones`, `solicitudes_adopcion`, `donantes`, `alertas_sensores`, `clientes` y `respaldos`. Detalle en [Base de datos compartida (SQL Server)](#base-de-datos-compartida-sql-server).
+2. **SQLite local** (`/var/pawos/pawos.db`, o `./pawos.db` en pruebas) para el personal (`usuarios`), `notas_veterinario` y la configuración local. Es un solo archivo; las migraciones se hacen con `ALTER TABLE` aditivo, sin borrar datos.
 
-El esquema se crea automáticamente la primera vez que corre cualquiera de los programas (`db_init()` en `db.c`), y las migraciones a bases de datos ya existentes (por ejemplo, agregar una columna nueva a una tabla vieja) se hacen con `ALTER TABLE` de forma aditiva, sin borrar nada de lo que ya había.
+Tablas principales del SQL Server:
+
+- **mascotas**: id, nombre, especie, raza, edad, estado (`disponible` / `en_proceso` / `adoptado` / `tratamiento`), fecha de ingreso y `foto_base64`.
+- **vacunas**: id, `mascota_id`, nombre de la vacuna, fecha de aplicación, fecha próxima, observaciones, `cliente_id` (el cliente a notificar) y `recordatorio_enviado`.
+- **adopciones**: mascota, adoptante, contacto y fecha (al registrarla, la mascota pasa a `adoptado`).
+- **solicitudes_adopcion**: pedidas desde el Portal de Clientes; estado `Pendiente` / `Aprobada` / `Rechazada`.
+- **donantes**: nombre, contacto, monto y fecha.
+- **clientes**: correo, contraseña (hash), nombre, teléfono, rol y `foto_base64`.
+- **alertas_sensores**: alertas que manda un sensor ESP32 externo.
+- **respaldos**: registro de los respaldos de datos hechos desde PawOS Archivos.
+
+## Base de datos compartida (SQL Server)
+
+Desde v1.19 los módulos principales usan un **SQL Server remoto** (SmarterASP.NET) en vez de la SQLite local, para que todo el equipo vea y edite los mismos registros.
+
+- **Conexión:** ODBC + FreeTDS (`TDS_Version=7.4`), en `src/db/db.c` (`api_conectar` / `api_desconectar`). Las funciones conservan nombre y firma (`mascota_*`, `vacuna_*`, `adopcion_*`, `donante_*`, `alerta_*`, `cliente_*`), así que `main_gtk.c` y las pantallas no cambiaron. La conexión es persistente y se reconecta sola tras un rato de inactividad.
+- **Contraseña:** nunca está en el código ni en el repo. Se lee de `~/.pawos_db_remota`. Cada usuario del equipo (y `root` para los servicios) debe tener ese archivo.
+- **Servidor, base y usuario:** tienen valores por defecto en `db.c` (`API_SQL_SERVIDOR`, `API_SQL_BASE`, `API_SQL_USUARIO`) y se pueden cambiar **sin recompilar** con el archivo opcional `~/.pawos_db_config` (una clave por línea):
+
+```
+SERVIDOR=sqlXXXX.site4now.net
+PUERTO=1433
+BASE=db_xxxxxx_pawos
+USUARIO=db_xxxxxx_pawos_admin
+```
+
+- **Dependencias:** `unixodbc`, `tdsodbc` y `freetds-bin` (el `.deb` las instala).
+- **Cuenta actual:** los valores por defecto apuntan a la cuenta de paga del equipo (`sql8011.site4now.net`, base `db_acf53d_pawos`). La cuenta anterior quedó suspendida y ya no se usa.
+- **Fotos:** se guardan como texto base64 en columnas `foto_base64` (mascotas y clientes).
+
+<!-- readme-cadena-conexion -->
+
+### Cadena de conexión
+
+`api_conectar()` en `src/db/db.c` arma la cadena ODBC con estos datos (la contraseña va aparte y **no se escribe en el repositorio**):
+
+| Dato | Valor por defecto | Dónde se define |
+|---|---|---|
+| Servidor | `sql8011.site4now.net` | `API_SQL_SERVIDOR` |
+| Puerto | `1433` | `API_SQL_PUERTO` |
+| Base de datos | `db_acf53d_pawos` | `API_SQL_BASE` |
+| Usuario | `db_acf53d_pawos_admin` | `API_SQL_USUARIO` |
+| Contraseña | *(no está en el código)* | archivo `~/.pawos_db_remota` |
+
+```
+DRIVER={FreeTDS};SERVER=sql8011.site4now.net;PORT=1433;DATABASE=db_acf53d_pawos;UID=db_acf53d_pawos_admin;PWD=<contraseña de ~/.pawos_db_remota>;TDS_Version=7.4;
+```
+
+Orden de prioridad de los datos: primero lo que diga `~/.pawos_db_config` (si existe), y si falta una clave se usa el valor por defecto de `db.c`. La contraseña siempre sale de `~/.pawos_db_remota` (una sola línea, sin espacios al final).
+
+> **Importante:** este repositorio es público. El nombre del servidor, la base y el usuario no son secretos por sí solos, pero la contraseña sí lo es: nunca se sube a GitHub, ni se pega en el grupo del equipo ni en capturas. Se comparte solo por un canal privado.
+
+### Poner en marcha la conexión en una computadora nueva
+
+1. Instalar las dependencias (el `.deb` ya las instala; si se compila desde el código):
+
+   ```
+   sudo apt install unixodbc tdsodbc freetds-bin
+   ```
+
+2. Crear el archivo de la contraseña (reemplazar el texto por la contraseña real) y dejarlo legible solo por el usuario:
+
+   ```
+   echo "LA_CONTRASENA" > ~/.pawos_db_remota
+   chmod 600 ~/.pawos_db_remota
+   ```
+
+3. Solo si cambió el servidor, la base o el usuario, crear `~/.pawos_db_config` con las claves que cambien (`SERVIDOR`, `PUERTO`, `BASE`, `USUARIO`, una por línea). No hace falta recompilar.
+4. Para los servicios que corren como `root` (por ejemplo `pawos-monitoreo`, que recibe las alertas del ESP32), el archivo debe existir también en `/root/.pawos_db_remota`.
+5. Comprobar que conecta (pide la contraseña en pantalla, sin dejarla en el historial):
+
+   ```
+   tsql -H sql8011.site4now.net -p 1433 -U db_acf53d_pawos_admin -D db_acf53d_pawos
+   ```
+
+   Si entra, probar `SELECT COUNT(*) FROM mascotas;` seguido de `GO`, y salir con `exit`. Después abrir `./pawos-refugio-gui`: si la lista de mascotas carga, la conexión funciona.
+
+### Cambiar la contraseña de la base
+
+1. En el panel de SmarterASP.NET (SQL Server de la cuenta), cambiar la contraseña del usuario de la base.
+2. En **cada** computadora y servicio que use la base, actualizar `~/.pawos_db_remota` (y `/root/.pawos_db_remota` donde corra un servicio). No hay que recompilar ni reinstalar nada.
+
+### Errores comunes
+
+| Síntoma | Causa probable |
+|---|---|
+| `Login failed for user` | Contraseña incorrecta o con salto de línea o espacio de más en `~/.pawos_db_remota`. |
+| El programa abre pero las listas salen vacías o con error de BD | Falta el archivo `~/.pawos_db_remota` (cada usuario de la computadora necesita el suyo). |
+| `Data source name not found` o `Can't open lib` | Falta `tdsodbc` o el driver `FreeTDS` no está registrado (`odbcinst -q -d` debe listar `[FreeTDS]`). |
+| Se demora y termina en tiempo agotado | Sin internet, o el servidor de SmarterASP bloqueando la IP. Probar `ping sql8011.site4now.net`. |
+| Funciona en la VM pero no en el servicio `pawos-monitoreo` | El servicio corre como `root` y le falta `/root/.pawos_db_remota`. |
 
 ## Módulos del programa
 
@@ -223,6 +388,220 @@ Gracias a que ambos lados (el código que genera `gcc` a partir de los `.c`, y e
 4. En el paso final, `gcc` no compila el `.asm` — solo **enlaza** `checksum.o` junto con todos los `.o` de C en un solo binario (`gcc $(OBJ) $(ASM_OBJ) -o pawos-refugio $(LDFLAGS)`). Para el enlazador, un símbolo es un símbolo: no le importa si el `.o` vino de C o de Ensamblador, siempre que los nombres y la convención de llamada coincidan.
 
 `integridad_actualizar_checksum_donantes()` guarda ese resultado en un archivo (`donantes.checksum`); `integridad_verificar_donantes()` (nombre real puede variar, ver `integridad.c`) vuelve a calcularlo y lo compara — si no coinciden, alguien modificó la base de donantes por fuera del programa.
+
+# Parte 3 — Apps y funciones del refugio
+
+## Las apps de PawOS
+
+PawOS dejó de ser un solo programa: son varias apps GTK3/C y utilidades que comparten la misma capa de datos (`src/db/db.c`).
+
+| App | Binario | Para quién | Qué hace |
+|---|---|---|---|
+| PawOS Refugio (CLI) | `pawos-refugio` | Personal | Versión de texto (ncurses). |
+| PawOS Refugio (GUI) | `pawos-refugio-gui` | Personal | Mascotas, Vacunas, Adopciones (con aprobación de solicitudes), Donantes, Reportes, Respaldo, Alertas, Procesos, Memoria, Colaboradores, Clientes y Notificaciones, todo en paneles embebidos. |
+| PawOS Vacunas | `pawos-vacunas-gui` | Personal | CRUD de vacunas con estados a color (VENCIDA, HOY, Al día). |
+| PawOS Monitor | `pawos-monitor-gui` | Personal | CPU, memoria, swap y disco en tiempo real leídos de `/proc`. No usa base de datos. |
+| PawOS Archivos | `pawos-archivos-gui` | Personal | Explorador por categorías, integridad de donantes y respaldos de datos. |
+| Portal de Clientes | `pawos-portal-clientes` | Clientes | Catálogo, solicitudes de adopción, mis mascotas y vacunas, donaciones, carnet y comprobantes en PDF. |
+| `pawos-foto` | `pawos-foto` | Personal / pruebas | Fotos de mascotas desde la terminal. |
+| `pawos-vacunas-check` | demonio | Sistema | Revisa vacunas pendientes cada día y manda los recordatorios. |
+
+### Clic derecho en Refugio
+
+Para no llenar la pantalla de botones, varias listas de PawOS Refugio usan **clic derecho** sobre una fila:
+
+- **Gestión de Mascotas:** Editar datos (nombre, especie, raza, edad), Foto, Cambiar estado y Eliminar. `mascota_actualizar_datos()` en `db.c` guarda los cambios.
+- **Agenda de Vacunas:** Editar y Eliminar. La tabla muestra, además del ID, el **nombre de la mascota** y el **cliente a notificar**.
+- **Administrar Clientes:** Editar datos (nombre y teléfono; la contraseña y el correo no se tocan) y Cambiar rol.
+
+Los botones de la parte de abajo se mantienen. Los roles sin permiso (por ejemplo Voluntario) ven las opciones deshabilitadas.
+
+## Interfaz de PawOS Refugio: paneles embebidos
+
+Desde v1.18 los módulos ya no abren ventanas emergentes encima: se dibujan en el **área dinámica** de la ventana principal, a la derecha del menú lateral.
+
+- **11 de 12 módulos** son paneles: Mascotas, Vacunas, Adopciones, Donantes, Reportes, Procesos, Memoria, Respaldo, Alertas, Colaboradores y Clientes. **Configurar Notificaciones** sigue como diálogo modal a propósito, porque es un formulario y no un listado.
+- Cada panel se construye con `abrir_pantalla_*` y se muestra con `mostrar_en_panel()`, que destruye el panel anterior. Su contexto se guarda con `g_object_set_data_full()`, así que se libera solo cuando el panel se reemplaza, sin depender de cerrar ninguna ventana.
+- El botón **Cerrar** de cada panel vuelve a la tarjeta de bienvenida.
+- Menú lateral organizado en secciones: *Atención al refugio*, *Gestión y administración*, *Sistema* y *Cuenta* (Buscar Actualizaciones, Acerca de, Salir).
+- **Maximizar y redimensionar:** se corrigió el botón de maximizar (tipo de ventana y comparación contra el tamaño real del monitor).
+- **Rol y permisos:** cada módulo se muestra u oculta con `modulo_permitido(rol, indice)`; las acciones sin permiso aparecen deshabilitadas, no ocultas.
+- **Menú lateral compacto:** los 12 módulos caben sin scroll; el menú va dentro de un área con scroll que solo aparece en pantallas muy bajas.
+
+## Reportes
+
+El módulo **Reportes** de PawOS Refugio (panel embebido, visible para Administrador y Veterinario) genera resúmenes del refugio y los muestra en pantalla antes de guardarlos o enviarlos. <!-- readme-reportes -->
+
+### Reportes disponibles
+
+- **Generar reporte:** resumen general del refugio.
+- **Por categoría:** Mascotas, Vacunas, Adopciones, Donantes y Alertas de Sensores.
+- **Historial:** cada reporte generado queda registrado y se puede volver a abrir (carpeta `reportes` de PawOS Archivos y `historial_reportes.log`).
+
+### Reportes por mes
+
+Al pulsar **Donantes**, **Vacunas**, **Adopciones** o **Alertas de Sensores** se abre un selector de mes (`pedir_mes_donantes()` y `pedir_mes_reporte()` en `main_gtk.c`). La lista siempre incluye los **últimos 12 meses** (`reporte_completar_ultimos_meses()`, mes y año) más cualquier mes anterior que tenga registros (`reporte_listar_meses()`), y la opción **Todos los meses**.
+
+| Reporte | Se agrupa por | Función |
+|---|---|---|
+| Donantes | fecha de la donación | `reporte_generar_donantes_mes()` |
+| Vacunas | fecha de aplicación | `reporte_generar_mensual(REPORTE_VACUNAS)` |
+| Adopciones | fecha de adopción | `reporte_generar_mensual(REPORTE_ADOPCIONES)` |
+| Alertas | fecha de la alerta (cuenta además las pendientes) | `reporte_generar_mensual(REPORTE_ALERTAS)` |
+| Mascotas | — (estado actual, sin mes) | `reporte_generar_mascotas()` |
+
+- **Un mes:** solo los registros de ese mes y su `TOTAL DEL MES`. Si no hay, el reporte lo dice.
+- **Todos los meses:** agrupado por mes, con subtotal por mes y `TOTAL GENERAL`. Los registros se ordenan por fecha.
+- El mes elegido queda en el título y en el historial (por ejemplo "Donantes (Octubre 2026)").
+- Los reportes originales (`reporte_generar_donantes()`, etc.) siguen existiendo sin cambios; las funciones por mes son nuevas.
+
+### PDF con diseño
+
+**Guardar como (.txt / .pdf)** usa `pawos-generar-pdf-reporte.py` (fpdf2) cuando se elige PDF: lee el texto del reporte y arma encabezado verde con el nombre del refugio, periodo, tarjetas con los totales, una tabla por mes con subtotales, recuadro con el total final y pie con número de página. Reconoce el formato de las cinco categorías y del reporte general; si una línea no coincide, la deja como texto normal. Si el script no está instalado o falla, `escribir_pdf_simple()` (Cairo) genera el PDF sencillo de antes, así que nunca se pierde la función. El script se instala en `/usr/local/bin` (`instalar-pawos.sh` y `construir-deb.sh`).
+
+### Enviar por correo o WhatsApp
+
+Junto a *Guardar como* hay dos botones, **Enviar por correo** y **Enviar por WhatsApp**, activos cuando ya hay un reporte en pantalla:
+
+1. `enviar_reporte()` pide el destino. En WhatsApp, un número de 8 dígitos recibe el prefijo `502`.
+2. Genera el PDF en una carpeta temporal (`g_dir_make_tmp`) con nombre legible, por ejemplo `reporte_de_donantes_octubre_2026.pdf`.
+3. Lo envía con `sudo -n /usr/local/bin/pawos-enviar-documento` (mismas credenciales de `/etc/pawos/notificaciones.conf` y misma regla de sudo que el Portal de Clientes; si falta, avisa que se corra `instalar-documentos.sh`).
+4. Borra el PDF temporal.
+
+Se envía exactamente el reporte que está en pantalla: para mandar una categoría completa se elige **Todos los meses**.
+
+## Portal de Clientes
+
+`pawos-portal-clientes` es una app aparte, pensada para las personas que adoptan o donan, no para el personal.
+
+- **Cuenta:** registro con foto (con editor), inicio de sesión con "ojito" para ver la contraseña, recuperar contraseña, editar perfil (nombre, teléfono, foto) y **Editar foto** sobre la foto ya guardada. Al cerrar la ventana pregunta si cerrar sesión (vuelve al login) o continuar.
+- **Catálogo de mascotas** disponibles, con miniatura de la foto.
+- **Solicitudes de adopción:** el cliente envía la solicitud; el personal (Veterinario, Recepcionista o Administrador) la aprueba o rechaza en *Control de Adopciones*. No se permiten dos solicitudes activas para la misma mascota.
+- **Mis mascotas y vacunas:** recordatorios de vacunas del cliente (las que tienen su `cliente_id`).
+- **Donaciones.**
+- **Documentos en PDF:** carnet (con página "Mis mascotas" y fotos), comprobantes y reportes, descargables y enviables por correo o WhatsApp.
+
+## Fotos de mascotas
+
+Cada mascota puede tener foto. Se guarda como **JPEG de máximo 300 px en base64** en `mascotas.foto_base64` (SQL Server).
+
+- **Refugio GUI:** al registrar una mascota o con clic derecho → *Foto*. El editor permite girar, voltear, ajustar brillo y contraste, hacer zoom y encuadre, y capturar con cámara (por ejemplo DroidCam).
+- **Portal de Clientes:** catálogo con miniaturas, y fotos de las mascotas en el carnet y los comprobantes.
+- **PawOS Archivos:** exporta las fotos de las mascotas a archivos `.jpg` y las incluye en el respaldo de datos.
+- **Terminal:** `pawos-foto`:
+
+```
+pawos-foto listar
+pawos-foto poner <id> <imagen> [--cuadrada]
+pawos-foto ver <id> <salida.jpg>
+pawos-foto quitar <id>
+```
+
+## Notificaciones: correo, WhatsApp y PDF
+
+PawOS manda avisos por **correo (Gmail)** y **WhatsApp (Green API)**, casi siempre con un PDF adjunto.
+
+| Aviso | Cuándo | Canales |
+|---|---|---|
+| Recordatorio de cita | Al registrar una vacuna con *Cliente a notificar* (con confirmación), y automáticamente cada día a las 8:00 por `pawos-vacunas-check` si la vacuna está pendiente o vencida | Correo y WhatsApp, con PDF |
+| Solicitud aprobada | Al aprobarla en Control de Adopciones | Correo y WhatsApp, con PDF del comprobante y foto de la mascota |
+| Solicitud rechazada | Al rechazarla | Solo correo, con el indicador de estado |
+
+Piezas:
+
+- `pawos-generar-pdf-cita.py` y `pawos-generar-pdf-documento.py` (fpdf2 y segno para el QR) arman los PDF: citas, carnet, comprobantes y tablas.
+- `pawos-enviar-correo-cita`, `pawos-enviar-whatsapp-cita` y `pawos-enviar-documento` hacen el envío.
+- `pawos-notificar-cita` (recordatorios) y `pawos-notificar-solicitud` (solicitudes) orquestan todo. Esta última registra cada intento en `~/.pawos_notificaciones.log`.
+- **Credenciales:** el Administrador las guarda desde *Configurar Notificaciones*, que llama por `sudo` a `pawos-configurar-notificaciones`, el único con permiso de escribir `/etc/pawos/notificaciones.conf` (`root`, permisos `600`). El formulario **no muestra los valores guardados**: guardarlo con campos vacíos borraría la configuración.
+- **Permisos:** una regla de sudoers (`/etc/sudoers.d/pawos-documentos`, grupo `pawos-refugio`) permite ejecutar solo los scripts de envío. Se instala con `sudo bash instalar-documentos.sh`.
+- **Teléfonos:** si el número tiene 8 dígitos se le antepone el código de Guatemala (`502`) antes de enviar por WhatsApp.
+
+## PawOS Archivos y respaldos de datos
+
+`pawos-archivos-gui` (`src/main_archivos_gui.c`) es el explorador de los archivos del refugio. Los organiza por categorías dentro de `/var/pawos/archivos`: mascotas, vacunas, adopciones, donantes, reportes y backups. Soporta carpetas, arrastrar y soltar, selección múltiple y clic derecho. También verifica la integridad de los donantes (ver [Integridad de datos](#integridad-de-datos-integridadc--checksumasm)).
+
+Tiene **dos botones de respaldo** que hacen cosas distintas:
+
+| | **Respaldar carpeta** | **Respaldar datos ahora** |
+|---|---|---|
+| Qué respalda | **Archivos** de una carpeta (fotos, PDF, documentos, subcarpetas) | **Datos de la base** (tablas en CSV), fotos de las mascotas y la base local de usuarios |
+| Lee SQL Server | No | Sí |
+| Sube algo a SmarterASP | No | Sí (una fila por tabla en la tabla `respaldos`) |
+| Dónde guarda | `Backups/<nombre>/<carpeta>` | `Backups/<nombre>/` |
+| Función | `on_respaldar_carpeta_clicked()` | `on_respaldar_clicked()` |
+| Otro acceso | — | Clic derecho → *Respaldar datos ahora* |
+
+<!-- readme-respaldos -->
+
+### Respaldar carpeta (archivos)
+
+Copia una carpeta completa, tal cual está, a `Backups/<nombre>/<carpeta>`. Es una copia de archivos en la misma computadora; no toca la base de datos.
+
+**Qué carpeta se respalda:**
+
+- Si **no hay nada marcado** en la lista, la carpeta que está abierta en ese momento.
+- Si hay **una sola carpeta marcada**, esa carpeta.
+- Si hay archivos sueltos o varias cosas marcadas, no respalda y avisa que se marque una sola carpeta (o que se quite la selección con un clic en un espacio vacío).
+- En la categoría **Backups** no funciona ("Backups ya guarda tus respaldos").
+
+**Cómo funciona:**
+
+1. Pide el nombre de la carpeta del respaldo (`pedir_carpeta_respaldo()`), con la fecha y hora por defecto, por ejemplo `mascotas_2026-10-27_09-59`. Valida que no esté vacío, que no contenga `/` ni `\`, que no sea demasiado largo y que **no exista ya** en `Backups`. Aquí no se consulta la nube.
+2. Copia de forma recursiva (`copiar_recursivo()`): crea las subcarpetas y copia cada archivo con `g_file_copy`.
+3. Muestra el resultado: carpeta, destino, cantidad de archivos copiados con su tamaño, y archivos con error.
+
+Sirve para proteger lo que se guardó como archivos: fotos exportadas, documentos y reportes.
+
+### Respaldar datos ahora (base de datos)
+
+Respalda la **información del refugio**. Al pulsarlo abre primero una lista con casillas para **elegir qué respaldar** (todo viene marcado por defecto):
+
+- las 7 tablas de SQL Server: `mascotas`, `vacunas`, `adopciones`, `donantes`, `alertas_sensores`, `clientes` y `notas_veterinario`;
+- las **fotos de las mascotas** (archivos `.jpg`);
+- la **base local de usuarios del personal** (SQLite).
+
+Se puede respaldar una sola tabla. Si se marca una sola cosa, el nombre sugerido la incluye (por ejemplo `Respaldo_mascotas_2026-10-27_10-30`).
+
+**Cómo funciona (`on_respaldar_clicked()`):**
+
+1. **Elige el nombre.** Por defecto `Respaldo_AAAA-MM-DD_HH-MM`. Revisa que no exista en `Backups` y consulta si ya existe en SmarterASP (`respaldo_existe_nombre()`). Si existe en la nube, ofrece **reemplazar** (borra el anterior con `respaldo_borrar_nombre()` y sube el nuevo, para no duplicar) o elegir otro nombre. Si hay una carpeta de Backups marcada que ya está en la nube, pregunta si **actualizar ese respaldo** o crear uno nuevo.
+2. **Lee las tablas elegidas** de SQL Server (`TABLAS_RESPALDO[]`, cada una con su función `csv_*`). Si alguna falla, **no se guarda nada a medias** y se muestra qué tabla falló.
+3. **Guarda cada tabla** como `Backups/<nombre>/<tabla>.csv` y la registra en la tabla `respaldos` de SmarterASP con `respaldo_guardar()` (columnas `fecha`, `tabla`, `contenido`).
+4. **Exporta las fotos** de las mascotas a `Backups/<nombre>/fotos_mascotas/<id>_<nombre>.jpg` (`exportar_fotos_mascotas()`, decodificando el base64 de `mascotas.foto_base64`).
+5. **Copia la base local de usuarios** (`archivos_respaldar_bd_auto()`).
+6. **Resumen:** cuántos CSV se guardaron, cuántos se copiaron a SmarterASP, cuántas fotos y si se copió el SQLite. Solo informa lo que se eligió.
+
+El CSV de `clientes` incluye correo, nombre, teléfono y rol, **no las contraseñas** ni las fotos.
+
+### Qué se guarda y dónde
+
+| Qué | Dónde |
+|---|---|
+| CSV de cada tabla | `/var/pawos/archivos/backups/<nombre>/<tabla>.csv` |
+| Fotos de mascotas | `/var/pawos/archivos/backups/<nombre>/fotos_mascotas/` |
+| Copia de las tablas en SQL Server | tabla `respaldos` de la base compartida |
+| Copia de una carpeta de archivos | `/var/pawos/archivos/backups/<nombre>/<carpeta>/` |
+
+### Límites y recomendaciones
+
+- La copia en la tabla `respaldos` está **en la misma base de datos** que los datos vivos: no protege si se pierde la base entera. Para eso hay que guardar también el `.bak` que se genera desde el panel de SmarterASP y los CSV **fuera de la máquina virtual**.
+- El respaldo en Google Drive de la base SQLite local es otro mecanismo, independiente de este (ver [Respaldo en la nube](#respaldo-en-la-nube--estado-actual)).
+
+## Administrar Colaboradores y asistente de bienvenida
+
+- **Asistente de bienvenida:** en la versión "producto" (`make gui-producto` y el `.deb`) no hay cuentas fijas. La primera vez, el asistente crea al primer Administrador.
+- **Administrar Colaboradores** (solo Administrador): crea Veterinario, Voluntario, Rescatista, Recepcionista u otro Administrador, con foto opcional guardada en base64.
+- **Administrar Clientes** (solo Administrador): lista las cuentas del Portal, cambia su rol y edita nombre y teléfono (clic derecho).
+- Las contraseñas del personal y de los clientes se guardan hasheadas (ver [Seguridad — estado actual](#seguridad--estado-actual)).
+
+## Monitoreo del sistema
+
+Hay dos piezas distintas:
+
+- **PawOS Monitor** (`pawos-monitor-gui`): app GTK local con CPU, memoria, swap y disco en tiempo real, con gráficas de historial (líneas y área degradada). Lee `/proc` directamente y no depende de la base de datos.
+- **Servidor de monitoreo** (`pawos-monitoreo`, puerto 8080): dashboard web con autenticación básica y el endpoint `POST /api/alerta` para el sensor ESP32 (ver [Módulos del programa](#módulos-del-programa)).
+
+# Parte 4 — Personalización, instalación y distribución
 
 ## Personalización del sistema (branding)
 
@@ -358,6 +737,8 @@ Como el código se copia una sola vez a `config/includes.chroot/opt/pawos/` en e
 
 Rearmar la ISO (este proceso de `lb build`) solo hace falta cuando se necesita una imagen instalable *nueva y actualizada* — por ejemplo, para instalar PawOS desde cero en otra máquina, para el USB de entrega final, o para que quien instale desde la ISO reciba ya la última versión del código. Para seguir desarrollando y probando sobre un PawOS que ya está instalado y corriendo, ese paso se puede saltar por completo.
 
+# Parte 5 — Operación, seguridad y respaldos
+
 ## Servicios del sistema (systemd)
 
 | Servicio | Qué hace | Se activa |
@@ -366,6 +747,15 @@ Rearmar la ISO (este proceso de `lb build`) solo hace falta cuando se necesita u
 | `pawos-vacunas.timer` | Revisa vacunas pendientes | Todos los días a las 8:00 AM |
 | `pawos-backup.timer` | Sube respaldo a la nube | Automático o manual, configurable desde el GUI (ver abajo) |
 | `ufw` (firewall) | Solo permite el puerto 8080 desde redes locales (192.168.x.x, 10.x.x.x, 172.16-31.x.x) | Al iniciar el sistema |
+
+### Servicios con la base de datos remota
+
+`pawos-monitoreo.service` y `pawos-vacunas.service` corren como **root** y también leen la base compartida. Como la contraseña se busca en `$HOME`, necesitan:
+
+- el archivo `/root/.pawos_db_remota` (permisos `600`) con la contraseña de la base, y
+- un *drop-in* con `Environment=HOME=/root` (`/etc/systemd/system/<servicio>.service.d/home.conf`).
+
+Sin eso, `pawos-vacunas.service` termina con `status=1`. Para ver su historial: `sudo journalctl -u pawos-vacunas`.
 
 ## Actualizaciones automáticas (botón "Buscar Actualizaciones")
 
@@ -536,6 +926,29 @@ Si algún día se cambian los argumentos de cualquiera de esos comandos en el c�
 
 > **Nota:** el hook `live-iso/hooks/0100-pawos-instalar.hook.chroot` (usado al armar la ISO) todavía no incluye `pawos-configurar-respaldo` ni su archivo de sudoers, así que tampoco tiene estos dos scripts nuevos — es una diferencia ya existente entre "instalar sobre un Debian normal" y "armar la ISO" que viene de antes de este cambio. Si se rearma la ISO, hay que portar también esa parte a mano.
 
+# Parte 6 — Historial y checklist del curso
+
+## Historial de versiones
+
+Resumen tomado de los commits de `rama-Combinada`.
+
+| Versión | Fecha | Cambios |
+|---|---|---|
+| 1.0 – 1.1 | 17–18 ago | Número de versión visible; reportes por categoría con historial, "Guardar como" `.txt`/`.pdf` y PDF con diseño; fondo y avatares de usuario. |
+| 1.2 – 1.3 | 27–30 ago | Diálogo de novedades al buscar actualizaciones; mensajes distintos en el login de clientes. |
+| 1.4 | 31 ago | Asistente de bienvenida, Administrar Colaboradores, roles Rescatista y Recepcionista, correcciones de memoria. |
+| 1.5 – 1.7 | 31 ago | Correcciones del actualizador (permisos, `safe.directory`, sudoers sin contraseña). |
+| 1.8 | 1 sep | Recordatorio de citas (PDF + correo + WhatsApp), teléfono en cliente, selector de cliente en vacunas, Configurar Notificaciones y Administrar Clientes. |
+| 1.9 – 1.11 | 2–3 sep | Scripts de recordatorio en instalador y `.deb`; recordatorios automáticos con `pawos-vacunas-check`; instalación automática de fpdf2. |
+| 1.13 – 1.17 | 3–5 sep | Mejoras de interfaz, aviso de actualizaciones y correcciones del instalador. |
+| 1.18 | 10 sep | 11 de 12 módulos pasan a paneles embebidos; corrección de maximizar. |
+| 1.19 | 12 sep | Gestión de Mascotas en SQL Server compartido (ODBC/FreeTDS). |
+| 1.20 | 12 sep | Vacunas, adopciones, donantes y alertas también en SQL Server; conexión persistente; cursor de carga. |
+| 1.21 | 2 oct | Nuevas apps: Vacunas GUI, Monitor y Portal de Clientes; Clientes migrado a SQL Server. |
+| Sin versión asignada | 8–27 oct | PawOS Archivos y respaldos de datos; Portal ampliado (catálogo, solicitudes, donaciones, recuperar contraseña, carnet y comprobantes en PDF); fotos de mascotas con editor y cámara; aprobación de solicitudes; avisos de solicitud con PDF; rol Cliente; configuración de la base por archivo; `pawos-foto`; cambio a la cuenta de paga; clic derecho en Mascotas, Vacunas y Clientes; columnas Mascota y Cliente en vacunas; Editar foto en el Portal; corrección del prefijo 502 en WhatsApp de citas. |
+
+**Pendiente:** `.deb`, número de versión, etiqueta y release con todo lo anterior, y el diseño final de correos y PDF.
+
 ## Requerimientos mínimos del curso — checklist
 
 | Requerimiento | Estado |
@@ -562,3 +975,5 @@ Si algún día se cambian los argumentos de cualquiera de esos comandos en el c�
 ## Equipo
 
 Proyecto Final — Sistemas Operativos I — Universidad Mariano Gálvez de Guatemala.
+
+<!-- readme-manual-tecnico -->

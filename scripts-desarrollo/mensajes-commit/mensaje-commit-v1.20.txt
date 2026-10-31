@@ -1,0 +1,16 @@
+v1.20: Base de datos compartida completa (5 modulos) via SQL Server
+
+- Se completa la migracion a la base de datos SQL Server compartida
+  (SmarterASP) iniciada en v1.19: ahora Agenda de Vacunas, Control de
+  Adopciones, Base de Donantes y Alertas de Sensores tambien usan la
+  base de datos remota compartida, ademas de Gestion de Mascotas.
+  Todo el equipo ve y edita los mismos registros en estos 5 modulos.
+- Conexion ODBC/FreeTDS ahora es persistente (se reutiliza en vez de
+  reconectar en cada operacion), para que la app responda mas rapido.
+  Se reconecta sola si detecta que la conexion llevaba varios minutos
+  inactiva.
+- Cursor de "cargando" en Gestion de Mascotas mientras espera al
+  servidor remoto, para que la pantalla no se sienta congelada.
+- El resto de modulos (usuarios, clientes) sigue usando SQLite local
+  sin cambios.
+- Actualizacion de version.

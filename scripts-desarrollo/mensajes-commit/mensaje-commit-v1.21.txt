@@ -1,0 +1,25 @@
+v1.21: PawOS llega a 5 apps -- Vacunas GUI, Monitor y Portal de Clientes
+
+- Nueva app PawOS Vacunas GUI (pawos-vacunas-gui): CRUD completo de
+  vacunas con vista de pendientes/vencidas y estados a color (VENCIDA,
+  HOY, Al dia). Se corrige un bug de datos: las fechas se validan
+  ahora en formato AAAA-MM-DD (tanto aqui como en el dialogo
+  "Registrar vacuna" de Refugio GUI), evitando fechas invalidas o en
+  formato incorrecto que rompian el filtro de pendientes/vencidas.
+- Nueva app PawOS Monitor (pawos-monitor-gui): CPU, memoria, swap y
+  disco en tiempo real leidos directo de /proc, con graficas de
+  historial (lineas + area degradada). No depende de la base de
+  datos.
+- Nueva app PawOS Portal de Clientes (pawos-portal-clientes): login y
+  autoregistro de clientes, vista de sus propios recordatorios de
+  vacunas, edicion de perfil y foto de perfil (guardada como texto
+  base64, con recorte de tamano libre: se puede mover y
+  agrandar/achicar el recuadro antes de confirmar).
+- El modulo de Clientes (login/registro) se migra de SQLite local a
+  SQL Server compartido, siguiendo el mismo patron ya usado en
+  Mascotas/Vacunas/Adopciones/Donantes/Alertas -- ahora los 6 modulos
+  principales viven en la base de datos remota compartida.
+- Las 3 apps nuevas quedan integradas al instalador .deb: se compilan,
+  se instalan junto con las demas, y tienen su propio icono en el
+  menu de aplicaciones y en el Escritorio.
+- Actualizacion de version.

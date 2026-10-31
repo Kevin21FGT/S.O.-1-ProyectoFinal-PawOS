@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""
+pawos-enviar-documento
+
+Manda un PDF por correo (Gmail) o por WhatsApp (Green API), usando las
+credenciales de /etc/pawos/notificaciones.conf (las mismas de los
+recordatorios de citas). Se ejecuta con sudo (regla en
+/etc/sudoers.d/pawos-documentos), porque el archivo de configuracion
+solo lo lee root.
+
+Por seguridad, solo envia archivos que de verdad sean PDF (empiezan con
+"%PDF-") y de menos de 10 MB; asi esta regla de sudo no sirve para
+mandar por internet cualquier otro archivo del sistema.
+
+Uso:
+    pawos-enviar-documento --canal correo --destino correo@ejemplo.com \
+        --pdf /ruta/documento.pdf --asunto "Carnet de vacunas" --mensaje "Hola..."
+    pawos-enviar-documento --canal whatsapp --destino 50212345678 \
+        --pdf /ruta/documento.pdf --mensaje "Hola..."
+"""
+
+import argparse
+import re
+import smtplib
+import subprocess
+import sys
+from email.message import EmailMessage
+from pathlib import Path
+
+CONFIG_PATH = "/etc/pawos/notificaciones.conf"
+MAX_BYTES = 10 * 1024 * 1024
+
+
+def leer_config():
+    config = {}
+    ruta = Path(CONFIG_PATH)
+    if not ruta.exists():
+        print(f"ERROR: no existe {CONFIG_PATH}. Configura primero las notificaciones desde PawOS Refugio (Admin).", file=sys.stderr)
+        sys.exit(1)
+    for linea in ruta.read_text(encoding="utf-8").splitlines():
+        linea = linea.strip()
+        if not linea or linea.startswith("#") or "=" not in linea:
+            continue
+        clave, valor = linea.split("=", 1)
+        config[clave.strip()] = valor.strip()
+    return config
+
+
+def validar_pdf(ruta):
+    if not ruta.is_file():
+        print(f"ERROR: no se encontro el PDF en {ruta}", file=sys.stderr)
+        sys.exit(1)
+    if ruta.suffix.lower() != ".pdf":
+        print("ERROR: el archivo no es un .pdf", file=sys.stderr)
+        sys.exit(1)
+    if ruta.stat().st_size > MAX_BYTES:
+        print("ERROR: el PDF pesa mas de 10 MB", file=sys.stderr)
+        sys.exit(1)
+    with open(ruta, "rb") as f:
+        if f.read(5) != b"%PDF-":
+            print("ERROR: el archivo no es un PDF valido", file=sys.stderr)
+            sys.exit(1)
+
+
+def enviar_correo(config, destino, ruta_pdf, asunto, mensaje):
+    usuario = config.get("GMAIL_USER")
+    clave_app = config.get("GMAIL_APP_PASSWORD")
+    if not usuario or not clave_app:
+        print("ERROR: falta GMAIL_USER o GMAIL_APP_PASSWORD en la configuracion.", file=sys.stderr)
+        sys.exit(1)
+    correo = EmailMessage()
+    correo["Subject"] = asunto
+    correo["From"] = usuario
+    correo["To"] = destino
+    correo.set_content(mensaje)
+    correo.add_attachment(ruta_pdf.read_bytes(), maintype="application", subtype="pdf", filename=ruta_pdf.name)
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as smtp:
+            smtp.starttls()
+            smtp.login(usuario, clave_app)
+            smtp.send_message(correo)
+    except Exception as e:
+        print(f"ERROR: no se pudo enviar el correo: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Correo enviado a {destino}")
+
+
+def enviar_whatsapp(config, destino, ruta_pdf, mensaje):
+    api_url = config.get("GREENAPI_API_URL")
+    id_instance = config.get("GREENAPI_ID_INSTANCE")
+    api_token = config.get("GREENAPI_API_TOKEN")
+    if not api_url or not id_instance or not api_token:
+        print("ERROR: falta GREENAPI_API_URL, GREENAPI_ID_INSTANCE o GREENAPI_API_TOKEN en la configuracion.", file=sys.stderr)
+        sys.exit(1)
+    numero = re.sub(r"\D", "", destino)
+    if not numero:
+        print("ERROR: el telefono quedo vacio despues de limpiarlo.", file=sys.stderr)
+        sys.exit(1)
+    endpoint = f"{api_url}/waInstance{id_instance}/sendFileByUpload/{api_token}"
+    r = subprocess.run(
+        ["curl", "--silent", "--show-error", "--fail", "--location", endpoint,
+         "--form", f"chatId={numero}@c.us",
+         "--form", f"file=@{ruta_pdf}",
+         "--form", f"fileName={ruta_pdf.name}",
+         "--form", f"caption={mensaje}"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        print(f"ERROR: no se pudo enviar el WhatsApp: {r.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+    print(f"WhatsApp enviado a {numero}")
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--canal", required=True, choices=["correo", "whatsapp"])
+    p.add_argument("--destino", required=True)
+    p.add_argument("--pdf", required=True)
+    p.add_argument("--asunto", default="Documento de PawOS Refugio")
+    p.add_argument("--mensaje", default="Adjuntamos tu documento. -- PawOS Refugio")
+    args = p.parse_args()
+
+    ruta_pdf = Path(args.pdf)
+    validar_pdf(ruta_pdf)
+    config = leer_config()
+    if args.canal == "correo":
+        enviar_correo(config, args.destino, ruta_pdf, args.asunto, args.mensaje)
+    else:
+        enviar_whatsapp(config, args.destino, ruta_pdf, args.mensaje)
+
+
+if __name__ == "__main__":
+    main()

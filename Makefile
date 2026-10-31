@@ -3,7 +3,7 @@ CC      = gcc
 NASM    = nasm
 CFLAGS  = -Wall -Wextra -std=c11 -D_DEFAULT_SOURCE -Iinclude -Isrc
 NASMFLAGS = -f elf64
-LDFLAGS = -lncurses -lsqlite3 -lm -lcrypt
+LDFLAGS = -lncurses -lsqlite3 -lm -lcrypt -lodbc
 
 SRC = src/main.c src/db/db.c src/ui/ui.c src/auth/auth.c src/pantallas/pantallas.c src/procesos/procesos.c src/pantalla_procesos/pantalla_procesos.c src/memoria/memoria.c src/pantalla_memoria/pantalla_memoria.c src/pantalla_login/pantalla_login.c src/archivos/archivos.c src/pantalla_archivos/pantalla_archivos.c src/integridad/integridad.c
 OBJ = $(SRC:.c=.o)
@@ -26,10 +26,10 @@ all: $(BIN) $(DEMONIO_BIN) $(MONITOR_BIN)
 $(BIN): $(OBJ) $(ASM_OBJ)
 	$(CC) $(OBJ) $(ASM_OBJ) -o $(BIN) $(LDFLAGS)
 $(DEMONIO_BIN): $(DEMONIO_OBJ)
-	$(CC) $(DEMONIO_OBJ) -o $(DEMONIO_BIN) -lsqlite3 -lm -lcrypt
+	$(CC) $(DEMONIO_OBJ) -o $(DEMONIO_BIN) -lsqlite3 -lm -lcrypt -lodbc
 
 $(MONITOR_BIN): $(MONITOR_OBJ)
-	$(CC) $(MONITOR_OBJ) -o $(MONITOR_BIN) -lsqlite3 -lm -lcrypt
+	$(CC) $(MONITOR_OBJ) -o $(MONITOR_BIN) -lsqlite3 -lm -lcrypt -lodbc
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -53,9 +53,13 @@ GTK_LIBS   = $(shell pkg-config --libs gtk+-3.0)
 
 GUI_BIN = pawos-refugio-gui
 GUI_PRODUCTO_BIN = pawos-refugio-gui-producto
+VACUNAS_GUI_BIN = pawos-vacunas-gui
+MONITOR_GUI_BIN = pawos-monitor-gui
+PORTAL_CLIENTES_BIN = pawos-portal-clientes
+ARCHIVOS_GUI_BIN = pawos-archivos-gui
 
 gui: src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c
-	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c -o $(GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
 
 # Variante para el instalador .deb ("vender el programa" - ver
 # construir-deb.sh): no siembra las cuentas fijas admin_refugio/
@@ -66,9 +70,34 @@ gui: src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memo
 # (pawos-refugio-gui-producto) para que las dos versiones puedan
 # existir compiladas al mismo tiempo sin pisarse.
 gui-producto: src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c
-	$(CC) $(CFLAGS) -DPAWOS_SIN_SEMILLA $(GTK_CFLAGS) src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c -o $(GUI_PRODUCTO_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt
+	$(CC) $(CFLAGS) -DPAWOS_SIN_SEMILLA $(GTK_CFLAGS) src/main_gtk.c src/db/db.c src/auth/auth.c src/procesos/procesos.c src/memoria/memoria.c -o $(GUI_PRODUCTO_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
 
 clean-gui:
 	rm -f $(GUI_BIN) $(GUI_PRODUCTO_BIN)
+
+vacunas-gui: src/main_vacunas_gui.c src/db/db.c
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_vacunas_gui.c src/db/db.c -o $(VACUNAS_GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
+
+clean-vacunas-gui:
+	rm -f $(VACUNAS_GUI_BIN)
+
+monitor-gui: src/main_monitor_gui.c
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_monitor_gui.c -o $(MONITOR_GUI_BIN) $(GTK_LIBS)
+
+clean-monitor-gui:
+	rm -f $(MONITOR_GUI_BIN)
+
+portal-clientes: src/main_portal_clientes.c src/db/db.c
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_portal_clientes.c src/db/db.c -o $(PORTAL_CLIENTES_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
+
+clean-portal-clientes:
+	rm -f $(PORTAL_CLIENTES_BIN)
+
+archivos-gui: src/main_archivos_gui.c src/archivos/archivos.c src/integridad/integridad.c src/db/db.c src/integridad/checksum.asm
+	nasm -f elf64 src/integridad/checksum.asm -o src/integridad/checksum.o
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) src/main_archivos_gui.c src/archivos/archivos.c src/integridad/integridad.c src/db/db.c src/integridad/checksum.o -o $(ARCHIVOS_GUI_BIN) $(GTK_LIBS) -lsqlite3 -lm -lcrypt -lodbc
+
+clean-archivos-gui:
+	rm -f $(ARCHIVOS_GUI_BIN)
 
 .PHONY: gui gui-producto clean-gui

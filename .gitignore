@@ -36,3 +36,10 @@ live-build-config/chroot.packages*
 pawos-refugio-gui-producto
 *.deb
 deb-build/
+/pawos-vacunas-gui
+/pawos-monitor-gui
+/pawos-portal-clientes
+/pawos-archivos-gui
+repomix-output.xml
+/pawos-foto
+*.bak_*

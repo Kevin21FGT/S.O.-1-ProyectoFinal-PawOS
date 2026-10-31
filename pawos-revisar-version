@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""pawos-revisar-version - Compara la version instalada de PawOS Refugio
+contra la ultima publicada en GitHub Releases. Funciona igual para
+cualquier instalacion (con .deb o compilada desde codigo fuente), sin
+depender de tener el repositorio clonado con git en esta maquina.
+
+Imprime en la salida estandar:
+  SIN_CONEXION   si no se pudo consultar GitHub
+  AL_DIA         si la version instalada ya es la mas reciente
+  HAY_CAMBIOS    seguido de las notas de la version (una linea por cambio)
+
+Uso: pawos-revisar-version <version_actual>
+"""
+import sys
+import json
+import urllib.request
+
+REPO = "Kevin21FGT/S.O.-1-ProyectoFinal-PawOS"
+
+
+def main():
+    version_actual = sys.argv[1] if len(sys.argv) > 1 else ""
+
+    try:
+        url = f"https://api.github.com/repos/{REPO}/releases/latest"
+        peticion = urllib.request.Request(url, headers={"User-Agent": "PawOS-Refugio"})
+        with urllib.request.urlopen(peticion, timeout=8) as resp:
+            datos = json.load(resp)
+    except Exception:
+        print("SIN_CONEXION")
+        return
+
+    tag = str(datos.get("tag_name", "")).strip().lstrip("vV")
+    if not tag:
+        print("SIN_CONEXION")
+        return
+
+    if tag == version_actual:
+        print("AL_DIA")
+        return
+
+    print("HAY_CAMBIOS")
+    cuerpo = datos.get("body") or ""
+    for linea in cuerpo.splitlines():
+        linea = linea.strip().lstrip("-").strip()
+        if linea:
+            print(linea)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,5 @@
+v1.17: correccion en el instalador
+
+- Se corrigio un problema que impedia instalar el programa en equipos
+  recien configurados.
+- Actualizacion de version.

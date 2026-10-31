@@ -77,7 +77,8 @@ typedef struct {
 typedef enum {
     ROL_CLIENTE_JEFE = 0,
     ROL_CLIENTE_SUPERVISOR = 1,
-    ROL_CLIENTE_ADMIN = 2
+    ROL_CLIENTE_ADMIN = 2,
+    ROL_CLIENTE_NORMAL = 3   /* persona normal (por defecto al registrarse) */
 } RolCliente;
 
 typedef struct {
@@ -87,6 +88,32 @@ typedef struct {
     char       telefono[32];  /* numero de WhatsApp, opcional */
     RolCliente rol;
 } Cliente;
+
+/* Solicitud de adopcion hecha por un Cliente desde el Portal de Clientes.
+ * estado: Pendiente | Aprobada | Rechazada (lo cambia el personal). */
+typedef struct {
+    int  id;
+    int  mascota_id;
+    int  cliente_id;
+    char fecha[16];     /* YYYY-MM-DD */
+    char estado[20];
+    char mensaje[501];  /* mensaje opcional del Cliente */
+} SolicitudAdopcion;
+
+/* Solicitud con los nombres ya resueltos (mascota y cliente), para la
+ * pantalla del personal. */
+typedef struct {
+    int  id;
+    int  mascota_id;
+    char mascota_nombre[64];
+    int  cliente_id;
+    char cliente_nombre[64];
+    char cliente_correo[128];
+    char cliente_telefono[32];
+    char fecha[16];
+    char estado[20];     /* Pendiente | Aprobada | Rechazada */
+    char mensaje[501];
+} SolicitudInfo;
 
 /* ---------- Ciclo de vida ---------- */
 int  db_init(const char *ruta);
@@ -106,7 +133,19 @@ int  cliente_actualizar(int id, const char *nombre, const char *password_nueva);
 int  cliente_actualizar_rol(int id, RolCliente nuevo_rol);
 const char *cliente_rol_nombre(RolCliente rol);
 int  cliente_listar(Cliente **out, int *n);
+int  cliente_guardar_foto(int id, const char *foto_base64);
+int  cliente_actualizar_telefono(int id, const char *telefono);
+int  cliente_obtener_foto(int id, char **out_foto_base64); /* out_foto_base64: liberar con free() */
+int  respaldo_existe_nombre(const char *nombre); /* 1 existe, 0 no, -1 error */
+int  respaldo_borrar_nombre(const char *nombre); /* borra las filas de un respaldo por nombre */
+int  respaldo_listar_nombres(char ***out, int *n); /* nombres de respaldos en la nube; liberar con free() */
+int  respaldo_guardar(const char *fecha, const char *nombre, const char *tabla, const char *contenido); /* copia de una tabla (CSV) en la tabla remota respaldos */
 int  mascota_listar_disponibles(Mascota **out, int *n);
+int  solicitud_crear(int mascota_id, int cliente_id, const char *fecha, const char *mensaje);
+int  solicitud_listar_cliente(int cliente_id, SolicitudAdopcion **out, int *n); /* liberar con free() */
+int  solicitud_existe_activa(int mascota_id, int cliente_id); /* 1 si, 0 no, -1 error */
+int  solicitud_listar_todas(SolicitudInfo **out, int *n); /* pendientes primero; liberar con free() */
+int  solicitud_resolver(int id, int mascota_id, int aprobar); /* 1 aprueba (mascota -> en_proceso), 0 rechaza; 0 = ok */
 
 /* ---------- Mascotas ---------- */
 int  mascota_agregar(const Mascota *m);
@@ -114,6 +153,14 @@ int  mascota_listar(Mascota **out, int *n);
 int  mascota_actualizar_estado(int id, const char *nuevo_estado);
 int  mascota_eliminar(int id);
 int  mascota_buscar_por_id(int id, Mascota *out);
+int  mascota_contar_dependencias(int id, int *vacunas, int *solicitudes, int *adopciones);
+int  mascota_eliminar_completa(int id);
+int  mascota_actualizar_datos(int id, const char *nombre, const char *especie,
+                              const char *raza, int edad);
+/* Foto de la mascota: JPEG en base64 (columna foto_base64, SQL Server). */
+int  mascota_guardar_foto(int id, const char *foto_base64);
+int  mascota_obtener_foto(int id, char **out_foto_base64); /* liberar con free(); "" si no tiene */
+int  mascota_ultimo_id(const char *nombre, const char *fecha_ingreso, int *id_out);
 
 /* ---------- Vacunas ---------- */
 int  vacuna_agregar(const Vacuna *v);
@@ -150,6 +197,19 @@ int reporte_generar_mascotas(const char *ruta_salida);
 int reporte_generar_vacunas(const char *ruta_salida);
 int reporte_generar_adopciones(const char *ruta_salida);
 int reporte_generar_donantes(const char *ruta_salida);
+/* mes = "AAAA-MM" para un solo mes; NULL o "" = todos, agrupado por mes. */
+int reporte_generar_donantes_mes(const char *ruta_salida, const char *mes);
+/* Reportes por mes de vacunas / adopciones / alertas. mes = "AAAA-MM" o NULL/"" = todos. */
+#define REPORTE_VACUNAS    1
+#define REPORTE_ADOPCIONES 2
+#define REPORTE_ALERTAS    3
+int reporte_generar_mensual(const char *ruta_salida, int tipo, const char *mes);
+/* Meses ("AAAA-MM", el mas reciente primero) que tienen registros. Devuelve cuantos. */
+int reporte_listar_meses(int tipo, char (*meses)[8], int max);
+/* Agrega los ultimos 12 meses (hasta hoy) a la lista y la deja del mas reciente al mas antiguo. */
+int reporte_completar_ultimos_meses(char (*meses)[8], int nm, int max);
+/* "2026-10" -> "Octubre 2026" */
+void reporte_mes_legible(const char *ym, char *out, int n);
 int reporte_generar_alertas(const char *ruta_salida);
 
 #endif
