@@ -20,11 +20,19 @@
 // =====================================================================
 // CONFIGURACION DE RED Y SERVIDOR PAWOS
 // =====================================================================
+<<<<<<< HEAD
 const char* WIFI_SSID     = "TIGO-5619 2.4";       // Nombre de la red Wi-Fi local
 const char* WIFI_PASSWORD = "4D9697509989";    // Contraseña de la red Wi-Fi
 
 // IP y Puerto del Servidor de Monitoreo PawOS (servidor_monitoreo.c en puerto 8080)
 const char* PAWOS_SERVER_URL = "http://192.168.0.67:8080/api/alerta";
+=======
+const char* WIFI_SSID     = "Paspi";       // Nombre de la red Wi-Fi local
+const char* WIFI_PASSWORD = "PaolaLopez";    // Contraseña de la red Wi-Fi
+
+// IP y Puerto del Servidor de Monitoreo PawOS (servidor_monitoreo.c en puerto 8080)
+const char* PAWOS_SERVER_URL = "http://10.46.85.213:8080/api/alerta";
+>>>>>>> rama-Kevin
 
 // Identificador unico del animal / collar / zona asignada
 const char* ANIMAL_ID = "MASCOTA_PIR_01";
