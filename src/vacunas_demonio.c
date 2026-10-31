@@ -15,6 +15,42 @@
 #define RUTA_BD_DEFECTO  "/var/pawos/pawos.db"
 #define RUTA_LOG_DEFECTO "/var/pawos/archivos/reportes/alertas_vacunas.log"
 
+// --- FUNCIÓN DE RESPALDO PARA CALCULAR HORAS SIN MOVIMIENTO ---
+#include <sqlite3.h>
+
+double alerta_horas_desde_ultimo_movimiento_pir(char *fecha_ultimo_out, size_t size) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    double horas = 0.0;
+    
+    // Abrimos la base de datos local
+    if (sqlite3_open("pawos.db", &db) != SQLITE_OK) {
+        return -1.0; 
+    }
+    
+    // Consulta SQL para calcular la diferencia de horas con el último registro del PIR
+    const char *sql = "SELECT detalles, (julianday('now', 'localtime') - julianday(fecha_hora)) * 24 FROM alertas_sensores WHERE sensor = 'PIR' ORDER BY id DESC LIMIT 1;";
+    
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *texto_fecha = sqlite3_column_text(stmt, 0);
+            horas = sqlite3_column_double(stmt, 1);
+            
+            if (texto_fecha && fecha_ultimo_out) {
+                snprintf(fecha_ultimo_out, size, "%s", texto_fecha);
+            }
+        } else {
+            // Si no hay ningún registro previo en la tabla, asumimos 8 horas para disparar la primera alerta
+            horas = 8.5; 
+            if (fecha_ultimo_out) snprintf(fecha_ultimo_out, size, "Sin registros previos");
+        }
+        sqlite3_finalize(stmt);
+    }
+    sqlite3_close(db);
+    return horas;
+}
+
+
 static void hoy_texto(char *buf, int len) {
     time_t t = time(NULL);
     struct tm tmv; localtime_r(&t, &tmv);
@@ -100,7 +136,43 @@ int main(void) {
             }
         }
     }
-    if (log) fclose(log);
+        if (log) fclose(log);
+
+    // =========================================================================
+    // --- MONITOREO DEL PLATO DE COMIDA (TU PARTE DEL PROYECTO) ---
+    // =========================================================================
+        char fecha_ultimo_mov[32] = {0};
+double horas_sin_comer = alerta_horas_desde_ultimo_movimiento_pir(fecha_ultimo_mov, sizeof(fecha_ultimo_mov));
+
+    // Si la función devuelve un número negativo o error, no hacemos nada
+    if (horas_sin_comer >= 0.0) {
+        printf("[%s] [MONITOREO COMIDA] La mascota lleva %.2f horas sin acercarse al plato.\n", sello, horas_sin_comer);
+        
+        FILE *log_comida = fopen("alertas_comida.log", "a");
+        if (log_comida) {
+            fprintf(log_comida, "[%s] Alerta: %.2f horas sin movimiento. Último: %s\n", sello, horas_sin_comer, fecha_ultimo_mov);
+            fclose(log_comida);
+        }
+
+        // Si han pasado 8 horas o más, disparamos la alerta automática del sistema operativo
+        if (horas_sin_comer >= 8.0) {
+            printf("[ALERTA PAWOS] ¡La mascota no ha comido en 8 horas!\n");
+            
+            pid_t pid_alerta = fork();
+            if (pid_alerta == 0) {
+                // Ejecuta de forma nativa el script de notificación que hicieron tus compañeros
+                execlp("pawos-enviar-whatsapp-cita", "pawos-enviar-whatsapp-cita", 
+                       "ALERTA PAWOS: El sensor no ha detectado movimiento en el plato de comida en más de 8 horas. La mascota podría no haber comido.", 
+                       (char *)NULL);
+                _exit(127);
+            } else if (pid_alerta > 0) {
+                int estado_alerta = 0;
+                waitpid(pid_alerta, &estado_alerta, 0);
+            }
+        }
+    }
+    // =========================================================================
+
     free(clientes);
     free(pendientes);
     db_close();
