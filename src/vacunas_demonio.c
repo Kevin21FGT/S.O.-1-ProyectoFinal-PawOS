@@ -95,7 +95,7 @@ int main(void) {
                     }
                     if (ok) vacuna_marcar_recordatorio_enviado(pendientes[i].id);
                 } else {
-                    fprintf(stderr, "[pawos-vacunas-check] No se pudo crear el proceso para notificar a %s.\n", c->nombre);
+                    fprintf(stderr, "[pawos-vacunas-check] No se puede crear el proceso para notificar a %s.\n", c->nombre);
                 }
             }
         }
